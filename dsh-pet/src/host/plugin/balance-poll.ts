@@ -86,22 +86,24 @@ export function createBalancePoll(deps: BalancePollInput) {
       // 也不能经 DSH 的 credential store 解析，所以优先走 standaloneAi 交出来的凭证。
       const standalone = standaloneAiBalance();
       const provider = standalone?.provider || ctx.agentDefaultModel.currentSelection().provider;
-      const result = await queryBalance(
-        provider,
-        async (ref) => {
-          if (standalone?.apiKey) return standalone.apiKey;
-          const rc = await ctx.credentials.resolve(credentialRef(ref));
-          return rc?.value;
-        },
-        // `deepseek-account`（免费额度 / 平台登录）没有 API Key：它的凭证是 DSH 账号服务
-        // 持有的授权记录，只能经 getBalance 查询。账号服务是可选服务（软取，不放进 inject）
-        // ——没装账号插件时它不在场，此时该路由报 credential-missing 而不是崩。
-        async () => {
-          const account = ctx.get('deepseekAccount', false);
-          if (!account) return undefined;
-          return account.getBalance(accountClientMetadata());
-        },
-      );
+      const result = standalone?.query
+        ? await standalone.query()
+        : await queryBalance(
+            provider,
+            async (ref) => {
+              if (standalone?.apiKey) return standalone.apiKey;
+              const rc = await ctx.credentials.resolve(credentialRef(ref));
+              return rc?.value;
+            },
+            // `deepseek-account`（免费额度 / 平台登录）没有 API Key：它的凭证是 DSH 账号服务
+            // 持有的授权记录，只能经 getBalance 查询。账号服务是可选服务（软取，不放进 inject）
+            // ——没装账号插件时它不在场，此时该路由报 credential-missing 而不是崩。
+            async () => {
+              const account = ctx.get('deepseekAccount', false);
+              if (!account) return undefined;
+              return account.getBalance(accountClientMetadata());
+            },
+          );
       state.writeSection('balance', mark(result));
       // 失败也写 S（前端弹文字说明），日志同样留一条：否则「查了、失败了」与「根本没查」
       // 在文件里长得一模一样。成功用 info，失败用 warn（亮度不同，扫一眼就能分辨）。

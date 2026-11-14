@@ -15,11 +15,26 @@ const AI_BALANCE_URL = '/standalone-ai/balance';
 
 function syncProtocolFields() {
   const codex = protocolSelect && protocolSelect.getValue() === 'codex';
-  for (const id of ['baseUrl', 'apiKey', 'deepseekApiKey', 'balance-provider-host']) {
+  const balanceResult = byId('balance-result');
+  const protocol = protocolSelect && protocolSelect.getValue();
+  if (balanceResult && balanceResult.dataset.protocol !== protocol) {
+    balanceResult.textContent = '';
+    balanceResult.dataset.protocol = protocol;
+  }
+  for (const id of ['baseUrl', 'apiKey', 'deepseekApiKey']) {
     const field = byId(id) && byId(id).closest('.field');
     if (field) field.hidden = codex;
   }
   if (byId('codex-note')) byId('codex-note').hidden = !codex;
+  if (byId('balance-provider-host')) byId('balance-provider-host').hidden = codex;
+  if (byId('balance-provider-label')) byId('balance-provider-label').textContent = codex ? 'Codex 额度与用量' : '余额查询服务商';
+  if (byId('balance-provider-note')) byId('balance-provider-note').textContent = codex
+    ? '读取当前 Codex 的套餐、窗口剩余额度、重置时间、额外点数和 Token 活动。额外点数以 Credits 显示；结果最多缓存 30 秒。'
+    : '选定余额服务商后，用保存的对应密钥查询余额。';
+  if (byId('balance-btn')) {
+    byId('balance-btn').textContent = codex ? '刷新 Codex 额度与用量' : '查询余额';
+    byId('balance-btn').disabled = !codex && (!balanceSelect || balanceSelect.getValue() === '');
+  }
   byId('model').placeholder = codex ? 'default：跟随本机 Codex，或从列表选择' : '填写或拉取模型 ID';
   if (codex && !byId('model').value.trim()) byId('model').value = 'default';
 }
@@ -64,6 +79,7 @@ function populateAi(data) {
 /** 把余额结果翻成一行可读文案；失败一律说明原因，不显示伪造数字。 */
 function describeBalance(data) {
   if (!data || data.ok !== true) {
+    if (data && data.provider === 'codex' && typeof data.message === 'string') return data.message;
     if (data && data.reason === 'credential-missing') return '缺少密钥：请先保存所选服务商的 API 密钥。';
     if (data && data.reason === 'unsupported') return '该服务商不提供余额查询。';
     return data && data.message ? '查询失败：' + data.message : '查询失败，请稍后重试。';
@@ -78,6 +94,15 @@ function describeBalance(data) {
   }
   if (data.shape === 'points') return payload.total + ' ' + payload.unit;
   if (data.shape === 'windows') return '月度已用 ' + payload.monthly + '%';
+  if (data.provider === 'codex' && data.shape === 'custom' && Array.isArray(payload.views)) {
+    function lines(node, depth) {
+      if (!node || depth > 6) return [];
+      return (typeof node.text === 'string' ? [node.text] : []).concat(
+        (Array.isArray(node.children) ? node.children.slice(0, 24) : []).flatMap(function(child) { return lines(child, depth + 1); })
+      );
+    }
+    return payload.views.slice(0, 4).map(function(view) { return lines(view, 0).join('\\n'); }).join('\\n\\n');
+  }
   return '已取到余额数据。';
 }
 
@@ -85,11 +110,12 @@ function wireBalanceQuery() {
   const button = byId('balance-btn');
   const result = byId('balance-result');
   button.addEventListener('click', async () => {
+    const queriedProtocol = protocolSelect && protocolSelect.getValue();
     button.disabled = true;
-    result.className = 'status';
+    result.className = queriedProtocol === 'codex' ? 'status codex-balance' : 'status';
     result.dataset.ok = '';
     result.dataset.error = '';
-    result.textContent = '正在查询余额…';
+    result.textContent = queriedProtocol === 'codex' ? '正在读取 Codex 额度与用量…' : '正在查询余额…';
     try {
       const response = await fetch(AI_BALANCE_URL, {
         method: 'POST',
@@ -99,15 +125,17 @@ function wireBalanceQuery() {
       });
       if (!response.ok) throw new Error('查询被拒绝（HTTP ' + response.status + '）');
       const data = await response.json();
+      if (protocolSelect && protocolSelect.getValue() !== queriedProtocol) return;
       const ok = data && data.ok === true;
       if (ok) result.dataset.ok = 'true';
       else result.dataset.error = 'true';
       result.textContent = (ok ? '✓ ' : '✗ ') + describeBalance(data);
     } catch (error) {
+      if (protocolSelect && protocolSelect.getValue() !== queriedProtocol) return;
       result.dataset.error = 'true';
       result.textContent = '✗ ' + (error && error.message ? error.message : String(error));
     } finally {
-      button.disabled = !balanceSelect || balanceSelect.getValue() === '';
+      button.disabled = !(protocolSelect && protocolSelect.getValue() === 'codex') && (!balanceSelect || balanceSelect.getValue() === '');
     }
   });
 }

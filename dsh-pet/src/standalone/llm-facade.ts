@@ -7,6 +7,7 @@
  */
 
 import type { CodexEventSink } from './codex/events.ts';
+import type { StandaloneBalanceAuth } from '../host/plugin/setup.ts';
 
 /** ctx.llm 替身的契约，形状必须与 DSH 一致。 */
 export interface StandaloneModelService {
@@ -25,7 +26,7 @@ export interface StandaloneModelService {
    * 单独开一个方法而不是塞进 currentSelection：余额服务商与聊天用的模型服务商是两件事，
    * 混在一起会让模型解析认不出自己的 provider。
    */
-  balanceAuth(): { provider: string; apiKey: string };
+  balanceAuth(): StandaloneBalanceAuth;
   /**
    * 单独保存的 DeepSeek 语音密钥；空串表示没单独配。
    *

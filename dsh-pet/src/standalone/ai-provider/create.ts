@@ -17,6 +17,8 @@ import { discoverCodexModels } from '../codex/transport.ts';
 import { startCodexMonitor } from '../codex/monitor.ts';
 import type { CodexEventSink } from '../codex/events.ts';
 import { codexImageUrl } from '../codex/attachments.ts';
+import { createCodexAccountReader } from '../codex/account.ts';
+import type { BalanceResult } from '../../host/balance/types.ts';
 
 /**
  * 保存设置：单飞、先中止在途请求，失败即暂停，等下一次保存成功才恢复。
@@ -91,6 +93,13 @@ export function createStandaloneAi(
         })
       : () => {};
   const modelOf = (): string => store.current().model;
+  const accountReader = createCodexAccountReader(home);
+  const readCodexBalance = async (): Promise<BalanceResult> => {
+    const result = await accountReader.read();
+    return runtime.disposed || store.current().protocol !== 'codex'
+      ? { ok: false, provider: 'codex', reason: 'unsupported', message: 'Codex 账户连接已关闭或切换。' }
+      : result;
+  };
 
   return {
     onSessionEvent(listener) {
@@ -113,7 +122,7 @@ export function createStandaloneAi(
     isReady: () => runtime.ready(),
     balanceAuth: () =>
       store.current().protocol === 'codex'
-        ? { provider: '', apiKey: '' }
+        ? { provider: 'codex', apiKey: '', query: readCodexBalance }
         : { provider: store.current().balanceProvider, apiKey: store.current().apiKey },
     deepseekKey: () => store.current().deepseekApiKey,
     async testConnection(input) {
@@ -142,12 +151,15 @@ export function createStandaloneAi(
       }
     },
     queryBalance: async () =>
-      runtime.disposed || store.current().protocol === 'codex'
+      runtime.disposed
         ? { ok: false, provider: '', reason: 'unsupported' }
-        : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
+        : store.current().protocol === 'codex'
+          ? readCodexBalance()
+          : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
     dispose() {
       runtime.disposed = true;
       runtime.active?.abort();
+      accountReader.dispose();
       stopMonitor();
       listeners.clear();
     },

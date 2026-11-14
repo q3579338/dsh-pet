@@ -22,6 +22,7 @@ import { resolveAsset } from '../http.ts';
 import { PollStateStore } from '../state.ts';
 import { WorkStatusStore } from '../work-status.ts';
 import type { StandaloneWhisperPolicy } from '../whisper-policy.ts';
+import type { BalanceResult } from '../balance/types.ts';
 
 /** 装配期需要的宿主上下文：只有 logger / effect / provide 三处能力。 */
 export interface HostSetupContext {
@@ -39,6 +40,8 @@ export interface StandaloneBalanceAuth {
   provider: string;
   /** 设置页保存的密钥；空串表示未保存。 */
   apiKey: string;
+  /** 本机账户连接的只读查询，优先于 API 密钥路径。 */
+  query?: () => Promise<BalanceResult>;
 }
 
 /** 装配产物：apply 后续逻辑与路由层共用的对象。 */

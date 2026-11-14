@@ -20,8 +20,15 @@ test('Codex first launch preserves the original character and existing user choi
     writeFileSync(paths.defaultFile, original);
     seedCodexProfile(paths);
     const seeded = JSON.parse(readFileSync(paths.userFile, 'utf8'));
-    assert.deepEqual(seeded.pets, [{ id: 'main', name: '大肥鱼', whisperEnabled: false, balanceEnabled: false }]);
+    assert.deepEqual(seeded.pets, [{ id: 'main', name: '大肥鱼', whisperEnabled: false, balanceEnabled: true }]);
+    assert.equal(seeded.eventsRefreshSec.balance, 120);
     assert.equal(readFileSync(paths.defaultFile, 'utf8'), original);
+    writeFileSync(
+      paths.userFile,
+      JSON.stringify({ pets: [{ id: 'main', name: '大肥鱼', whisperEnabled: false, balanceEnabled: false }] }),
+    );
+    seedCodexProfile(paths);
+    assert.equal(JSON.parse(readFileSync(paths.userFile, 'utf8')).pets[0].balanceEnabled, true);
     const chosen = '{"pets":[{"id":"main","whisperEnabled":true}]}';
     writeFileSync(paths.userFile, chosen);
     seedCodexProfile(paths);

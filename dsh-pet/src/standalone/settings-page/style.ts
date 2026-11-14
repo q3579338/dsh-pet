@@ -111,6 +111,7 @@ input:disabled,select:disabled,textarea:disabled{background:var(--dsw-static-neu
 .status{margin:0;min-height:20px;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary)}
 .status[data-error=true]{color:var(--dsw-static-red-500)}
 .status[data-ok=true]{color:var(--dsw-static-green-600)}
+.codex-balance{flex-basis:100%;white-space:pre-line;overflow-wrap:anywhere;color:var(--dsw-alias-label-secondary)}
 .pathRow{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;color:var(--dsw-alias-label-secondary);border-top:1px solid var(--dsw-alias-border-l1)}
 .pathRow:first-child{border-top:0}
 .pathKey{flex:none;width:80px;color:var(--dsw-alias-label-tertiary)}
