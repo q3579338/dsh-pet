@@ -9,6 +9,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { createLlmFacade, createOfflineLlm, type StandaloneModelService } from './llm-facade.ts';
+import type { PetImageSink } from '../host/image-attachment.ts';
 
 /** 独立模式下余额路由报出的未登记服务商 id。 */
 export const STANDALONE_PROVIDER = 'standalone';
@@ -41,6 +42,8 @@ export interface StandaloneContextOptions {
   routes?: RegisteredRoute[];
   /** 可选的 AI 服务，缺失时模型能力明确不可用。 */
   ai?: StandaloneModelService;
+  /** 可选的图片附件服务，独立桌面版由 Electron 校验图片。 */
+  attachments?: PetImageSink;
   /** 给地址附加访问凭据的包装。 */
   authenticatedUrl?: (baseUrl: string) => string;
   /**
@@ -147,9 +150,12 @@ export function createStandaloneContext(options: StandaloneContextOptions): Stan
   const context: Record<string, unknown> = {
     effect: createEffectRunner(disposers, failures, logger),
     ...createServiceRegistry(services, () => context),
-    /** 独立模式没有 DSH 会话事件：不订阅，工作状态保持空闲。 */
-    on(): () => void {
-      return () => {};
+    /** 复用原桌宠的状态归约器，Codex 事件只投影到本实例。 */
+    on(name: string, listener: (...args: unknown[]) => void): () => void {
+      if (name !== 'session/event' || !ai?.onSessionEvent) return () => {};
+      return ai.onSessionEvent(({ sessionId, event }) => {
+        listener({ id: sessionId, header: { id: sessionId } }, event);
+      });
     },
     logger,
     webServer,
@@ -173,6 +179,7 @@ export function createStandaloneContext(options: StandaloneContextOptions): Stan
         ai?.currentSelection() ?? { provider: STANDALONE_PROVIDER, model: '' },
     },
     credentials: { resolve: async (): Promise<undefined> => undefined },
+    ...(options.attachments ? { attachments: options.attachments } : {}),
     llm: ai ? createLlmFacade(ai) : createOfflineLlm(),
   };
 

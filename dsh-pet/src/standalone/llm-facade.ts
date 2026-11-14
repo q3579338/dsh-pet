@@ -6,8 +6,12 @@
  * @module dsh-pet/src/standalone/llm-facade
  */
 
+import type { CodexEventSink } from './codex/events.ts';
+
 /** ctx.llm 替身的契约，形状必须与 DSH 一致。 */
 export interface StandaloneModelService {
+  /** 可选的宿主状态订阅，缺失时保持独立离线模式的行为。 */
+  onSessionEvent?(listener: CodexEventSink): () => void;
   currentSelection(): { provider: string; model: string };
   listProviders(): unknown[];
   listModels(provider: string): Promise<unknown[]>;

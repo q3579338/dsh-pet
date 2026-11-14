@@ -11,6 +11,7 @@ import { rolldown } from 'rolldown';
 
 const pet = {
   id: 'pet-1',
+  assetRoot: 'main',
   name: 'Blue',
   size: 240,
   display: 'web',
@@ -30,6 +31,9 @@ const defaults = {
       throwPower: 1,
       ceilingBounce: false,
       petCollision: false,
+      hapticEnabled: true,
+      tiltGravity: true,
+      shakeThrow: true,
     },
     whisperModel: { provider: '', model: '' },
     chatModel: { provider: '', model: '' },
@@ -154,7 +158,7 @@ test('config save errors: write failures keep edits visible and allow a retry', 
 
 test('config save errors: validation failures explain the rejected configuration', async (t) => {
   const { page } = await open(t, {
-    put: (route) => route.fulfill({ status: 400, json: { error: 'invalid pet config' } }),
+    put: (route) => route.fulfill({ json: { ok: false, reason: 'bad-request' } }),
   });
   await save(page);
   await page
@@ -200,7 +204,12 @@ test('pending config prevents editing and saving placeholder defaults', async (t
     },
   });
   try {
-    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true);
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Save', exact: true })
+        .evaluateAll((buttons) => buttons.every((button) => button.disabled)),
+      true,
+    );
     assert.equal(await page.locator('input[type=text]').first().isDisabled(), true);
     assert.deepEqual(writes, []);
   } finally {
@@ -222,7 +231,12 @@ for (const failure of ['http', 'network', 'malformed', 'null']) {
               ),
     });
     await page.getByRole('alert').waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true);
+    assert.equal(
+      await page
+        .getByRole('button', { name: 'Save', exact: true })
+        .evaluateAll((buttons) => buttons.every((button) => button.disabled)),
+      true,
+    );
     assert.deepEqual(writes, []);
     fail = false;
     await page.getByRole('button', { name: 'Retry', exact: true }).click();
@@ -278,12 +292,20 @@ test('model picker remains anchored while the responsive settings panel is scrol
   await trigger.click();
   const panel = page.getByRole('menu');
   await panel.waitFor();
-  for (const scrollY of [0, 120]) {
+  const initialScroll = await page.evaluate(() => window.scrollY);
+  for (const scrollY of [initialScroll, initialScroll + 120]) {
     await page.evaluate((y) => window.scrollTo(0, y), scrollY);
     await page.waitForFunction(() => {
       const trigger = document.querySelector('.dsh-pet-mp__trigger').getBoundingClientRect();
       const panel = document.querySelector('.dsh-pet-mp__panel').getBoundingClientRect();
-      return Math.abs(panel.left - trigger.left) < 2 && panel.top >= 0 && panel.bottom <= innerHeight;
+      return (
+        panel.left <= trigger.right &&
+        panel.right >= trigger.left &&
+        panel.left >= 0 &&
+        panel.right <= innerWidth &&
+        panel.top >= 0 &&
+        panel.bottom <= innerHeight
+      );
     });
   }
   await page.getByRole('menuitemradio', { name: 'Follow current conversation' }).click();

@@ -9,6 +9,10 @@
  */
 /** 为相对 import 依次补 `.ts` 与 `/index.ts`，都不成则落回原说明符交给 Node 报错。 */
 export async function resolve(specifier, context, nextResolve) {
+  // 与独立产物的三个 alias 同口径，测试不安装或启动 DSH。
+  const shimNames = ['dsh-home-paths', 'dsh-credentials', 'dsh-llm'];
+  const shim = shimNames.find((name) => specifier === '@deepseek-ai/' + name);
+  if (shim) return nextResolve(new URL('../src/standalone/shims/' + shim + '.ts', import.meta.url).href, context);
   if (specifier.startsWith('./') || specifier.startsWith('../')) {
     if (!/\.[cm]?[jt]sx?$/.test(specifier) && !specifier.endsWith('.json')) {
       for (const candidate of [specifier + '.ts', specifier + '/index.ts']) {

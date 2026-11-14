@@ -17,8 +17,8 @@ export const BALANCE_PROVIDERS = ['', 'deepseek-official', 'opencode-go', 'comma
 
 /** 对外可见的设置视图：密钥只以 hasKey 表示；AI 是否可用只看地址、模型与密钥是否齐全。 */
 export interface StandaloneAiPublicSettings {
-  /** 接口协议，仅支持 OpenAI 兼容与 Anthropic 两种。 */
-  protocol: 'openai-compatible' | 'anthropic';
+  /** Codex 使用已有本机登录；其余协议使用独立 API 凭据。 */
+  protocol: 'openai-compatible' | 'anthropic' | 'codex';
   /** 服务商接口地址，为空表示尚未配置。 */
   baseUrl: string;
   /** 模型标识，原样传给服务商。 */
@@ -88,7 +88,7 @@ function containsControlChar(s: string): boolean {
 
 /** 成品配置的字段契约：长度、范围与字符集在这里一次定死。 */
 const fields = {
-  protocol: z.enum(['openai-compatible', 'anthropic']),
+  protocol: z.enum(['openai-compatible', 'anthropic', 'codex']),
   baseUrl: z.string().max(2048).refine(safeEndpoint),
   model: z
     .string()
@@ -171,6 +171,8 @@ export interface AiConfigStore {
  */
 export function createAiConfig(home: string): AiConfigStore {
   let settings: Readonly<StandaloneAiSettings> = DEFAULT_AI_SETTINGS;
+  if (process.env.DSH_PET_CODEX === '1')
+    settings = Object.freeze({ ...DEFAULT_AI_SETTINGS, protocol: 'codex', model: 'default', timeoutMs: 60_000 });
   try {
     const loaded = readAiSettings(home);
     // 旧配置文件没有后加的字段，先铺默认值再校验；否则升级后 strict 校验会拒绝整个文件，独立模式起不来。

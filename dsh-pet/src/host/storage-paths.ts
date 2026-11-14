@@ -52,9 +52,10 @@ export interface StoragePathInput {
  */
 function desktopUserDataDir(input: StoragePathInput): string {
   const { home, env = process.env, platform = process.platform } = input;
-  if (platform === 'win32') return join(env.APPDATA || join(home, 'AppData', 'Roaming'), DESKTOP_APP_NAME);
-  if (platform === 'darwin') return join(home, 'Library', 'Application Support', DESKTOP_APP_NAME);
-  return join(env.XDG_CONFIG_HOME || join(home, '.config'), DESKTOP_APP_NAME);
+  const name = env.DSH_PET_CODEX === '1' ? 'codex-bigfish' : DESKTOP_APP_NAME;
+  if (platform === 'win32') return join(env.APPDATA || join(home, 'AppData', 'Roaming'), name);
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support', name);
+  return join(env.XDG_CONFIG_HOME || join(home, '.config'), name);
 }
 
 /**

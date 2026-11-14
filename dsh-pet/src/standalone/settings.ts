@@ -43,7 +43,7 @@ const endpoint = z
 /** 设置补丁的契约：未知字段一律拒绝。 */
 const settingsSchema = z
   .object({
-    protocol: z.enum(['openai-compatible', 'anthropic']).optional(),
+    protocol: z.enum(['openai-compatible', 'anthropic', 'codex']).optional(),
     baseUrl: endpoint.optional(),
     model: z.string().max(200).optional(),
     /** 只限长度；取值枚举由 ai-config.ts 的持久化校验把关，避免两处各写一份名单。 */

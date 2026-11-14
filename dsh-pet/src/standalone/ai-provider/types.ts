@@ -9,6 +9,7 @@ import { type createAiConfig, type StandaloneAiPublicSettings } from '../ai-conf
 import { type AiFetch } from '../ai-transport.ts';
 import { type StandaloneLogger } from '../context.ts';
 import { type BalanceResult } from '../../host/balance/index.ts';
+import type { CodexEventSink } from '../codex/events.ts';
 
 /** 设置存储：`createAiConfig` 的返回形状。 */
 export type AiStore = ReturnType<typeof createAiConfig>;
@@ -51,6 +52,8 @@ export type ModelDiscoveryResult =
  * `ready()` 是全服务唯一的可用判定（未释放、未暂停、未在保存、设置完整），两个子模块每次请求都要重新问。
  */
 export interface AiRuntime {
+  /** 本机附件解析器，只在 Codex 模式调用。 */
+  imageUrl?: (ref: unknown) => string;
   readonly store: AiStore;
   readonly logger: StandaloneLogger;
   readonly fetcher: AiFetch;
@@ -63,10 +66,14 @@ export interface AiRuntime {
   saving: boolean;
   /** 在途请求的控制器；非空即表示忙碌。 */
   active: AbortController | undefined;
+  /** 本实例的 Codex 状态出口，不包含桌面聊天正文。 */
+  codexEvents?: CodexEventSink;
 }
 
 /** 独立模式 AI 服务的对外形状。 */
 export interface StandaloneAiService {
+  /** 原桌宠的会话监听订阅 Codex 状态，释放后不再接收回调。 */
+  onSessionEvent?(listener: CodexEventSink): () => void;
   /** 当前选中的服务商与模型；未就绪时模型为空。 */
   currentSelection(): { provider: string; model: string };
   /** 就绪时返回唯一的 standalone 服务商。 */

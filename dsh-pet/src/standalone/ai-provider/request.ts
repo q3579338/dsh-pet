@@ -15,19 +15,41 @@ import { MAX_INPUT_CHARS, inputSchema, textBlock } from './limits.ts';
  * @returns 规范化请求与可选的取消信号。
  * @throws 输入越界、角色顺序不合法或模型不匹配时抛出。
  */
-export function parseRequest(options: unknown, model: string): { request: AiRequest; signal?: AbortSignal } {
+export function parseRequest(
+  options: unknown,
+  model: string,
+  imageUrl?: (ref: unknown) => string,
+): { request: AiRequest; signal?: AbortSignal } {
   const parsed = inputSchema.safeParse(options);
   if (!parsed.success || parsed.data.model !== model)
     throw new Error('Invalid standalone AI model selection or input.');
   const { data } = parsed;
+  const images: string[] = [];
   const messages = data.messages
-    .map((message) => ({
+    .map((message, index) => ({
       role: message.role,
       content:
         typeof message.content === 'string'
           ? message.content
           : message.content
               .map((block) => {
+                if (
+                  imageUrl &&
+                  typeof block === 'object' &&
+                  block !== null &&
+                  'type' in block &&
+                  block.type === 'image'
+                ) {
+                  if (
+                    index !== data.messages.length - 1 ||
+                    message.role !== 'user' ||
+                    images.length ||
+                    !('attachment' in block)
+                  )
+                    throw new Error('Invalid standalone AI image input.');
+                  images.push(imageUrl(block.attachment));
+                  return '';
+                }
                 // 非文本块与 DSH 来源元数据不进入请求：服务商只该看到文本。
                 if (typeof block !== 'object' || block === null || !('type' in block) || block.type !== 'text')
                   return '';
@@ -48,7 +70,7 @@ export function parseRequest(options: unknown, model: string): { request: AiRequ
   ) {
     throw new Error('Standalone AI input is empty or exceeds limits.');
   }
-  return { request: { system, messages }, signal: data.signal };
+  return { request: { system, messages, ...(images.length ? { images } : {}) }, signal: data.signal };
 }
 
 /** 让等待中的读取也能响应取消。 */

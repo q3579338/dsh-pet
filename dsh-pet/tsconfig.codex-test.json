@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.codex.json",
+  "include": ["src"],
+  "exclude": []
+}

@@ -13,6 +13,10 @@ import { discoverModels } from './list-models.ts';
 import { queryStandaloneBalance } from './balance.ts';
 import { createTextStream } from './stream.ts';
 import { testAiConnection } from './test-connection.ts';
+import { discoverCodexModels } from '../codex/transport.ts';
+import { startCodexMonitor } from '../codex/monitor.ts';
+import type { CodexEventSink } from '../codex/events.ts';
+import { codexImageUrl } from '../codex/attachments.ts';
 
 /**
  * 保存设置：单飞、先中止在途请求，失败即暂停，等下一次保存成功才恢复。
@@ -58,6 +62,7 @@ export function createStandaloneAi(
     throw new Error('Cannot securely load standalone AI settings.');
   }
   const runtime: AiRuntime = {
+    imageUrl: (ref) => codexImageUrl(home, ref),
     store,
     logger,
     fetcher: dependencies.fetch ?? globalThis.fetch.bind(globalThis),
@@ -71,14 +76,29 @@ export function createStandaloneAi(
         !runtime.paused &&
         !runtime.saving &&
         !!store.current().model &&
-        !!store.current().baseUrl &&
-        !!store.current().apiKey
+        (store.current().protocol === 'codex' || (!!store.current().baseUrl && !!store.current().apiKey))
       );
     },
   };
+  const listeners = new Set<CodexEventSink>();
+  runtime.codexEvents = (event) => {
+    for (const listener of listeners) listener(event);
+  };
+  const stopMonitor =
+    process.env.DSH_PET_CODEX === '1' && process.env.DSH_PET_CODEX_OBSERVE !== '0'
+      ? startCodexMonitor((event) => {
+          if (store.current().protocol === 'codex') runtime.codexEvents?.(event);
+        })
+      : () => {};
   const modelOf = (): string => store.current().model;
 
   return {
+    onSessionEvent(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     currentSelection: () => ({ provider: PROVIDER, model: runtime.ready() ? modelOf() : '' }),
     listProviders: () => (runtime.ready() ? [{ id: PROVIDER, name: 'Standalone AI' }] : []),
     listModels: async (provider) =>
@@ -91,23 +111,45 @@ export function createStandaloneAi(
     getSettings: () => store.publicSettings(),
     saveSettings: (input) => saveSettings(runtime, store, input),
     isReady: () => runtime.ready(),
-    balanceAuth: () => ({ provider: store.current().balanceProvider, apiKey: store.current().apiKey }),
+    balanceAuth: () =>
+      store.current().protocol === 'codex'
+        ? { provider: '', apiKey: '' }
+        : { provider: store.current().balanceProvider, apiKey: store.current().apiKey },
     deepseekKey: () => store.current().deepseekApiKey,
-    testConnection: (input) =>
-      runtime.disposed
-        ? Promise.resolve({ ok: false, message: '服务已关闭' })
-        : testAiConnection(runtime.fetcher, store.current(), input),
-    discoverModels: (input) =>
-      runtime.disposed
-        ? Promise.resolve({ ok: false, code: 'input', message: '服务已关闭' })
-        : discoverModels(runtime.fetcher, store.current(), input),
+    async testConnection(input) {
+      if (runtime.disposed) return { ok: false, message: '服务已关闭' };
+      if ((input.protocol ?? store.current().protocol) !== 'codex')
+        return testAiConnection(runtime.fetcher, store.current(), input);
+      try {
+        const models = await discoverCodexModels();
+        return { ok: true, message: `已连接本机 Codex，读取到 ${models.length - 1} 个模型；本次检查未请求聊天回复。` };
+      } catch {
+        return { ok: false, message: '无法连接本机 Codex。请先打开并登录 Codex，或检查 DSH_PET_CODEX_PATH。' };
+      }
+    },
+    async discoverModels(input) {
+      if (runtime.disposed) return { ok: false, code: 'input', message: '服务已关闭' };
+      if ((input.protocol ?? store.current().protocol) !== 'codex')
+        return discoverModels(runtime.fetcher, store.current(), input);
+      try {
+        return { ok: true, models: await discoverCodexModels() };
+      } catch {
+        return {
+          ok: false,
+          code: 'codex-unavailable',
+          message: '无法读取本机 Codex 的模型列表，请检查程序与登录状态。',
+        };
+      }
+    },
     queryBalance: async () =>
-      runtime.disposed
+      runtime.disposed || store.current().protocol === 'codex'
         ? { ok: false, provider: '', reason: 'unsupported' }
         : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
     dispose() {
       runtime.disposed = true;
       runtime.active?.abort();
+      stopMonitor();
+      listeners.clear();
     },
   };
 }

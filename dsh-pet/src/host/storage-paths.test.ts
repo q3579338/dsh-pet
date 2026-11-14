@@ -48,6 +48,10 @@ describe('storageEntries —— 写入方路径原样透传（不自己拼目录
 });
 
 describe('storageEntries —— 逐平台路径推导', () => {
+  test('Codex 适配版的存储清单指向独立目录', () => {
+    const entries = storageEntries({ ...base, platform: 'win32', env: { APPDATA: 'C:\\Roaming', DSH_PET_CODEX: '1' } });
+    assert.equal(pathOf(entries, 'desktopCache'), join('C:\\Roaming', 'codex-bigfish'));
+  });
   test('win32：系统级目录走 APPDATA/LOCALAPPDATA', () => {
     const entries = storageEntries({
       ...base,

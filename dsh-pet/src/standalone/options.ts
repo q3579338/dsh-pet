@@ -19,7 +19,7 @@ export interface CliOptions {
 }
 
 /** --help 正文。 */
-export const USAGE = `dsh-pet 独立模式（不需要 DSH）
+export const USAGE = `大肥鱼 · Codex 适配（不需要安装 DeepSeek）
 
 用法：dsh-pet-standalone [选项]
 
@@ -30,8 +30,9 @@ export const USAGE = `dsh-pet 独立模式（不需要 DSH）
 
 说明：
   桌宠在独立模式下以「透明置顶小窗」运行；浏览器内浮层需要有 DSH 网页，独立模式不提供。
-  对话与碎碎念可在本机 AI 设置页配置 API 后显式启用；未配置时不发送模型请求。
-  余额 / DSH 会话工作状态 / 系统通知仍需要 DSH 宿主。
+  对话默认使用已经登录的本机 Codex；碎碎念默认关闭，可在设置中开启。
+  Codex 工作状态通过只读会话记录联动；原版的 DSH 余额与系统消息不可用。
+  数据独立保存在 ~/.codex-bigfish；DSH_PET_CODEX_PATH 可指定本机 Codex 可执行文件。
 `;
 
 /**

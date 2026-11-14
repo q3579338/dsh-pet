@@ -6,8 +6,8 @@
 #   2. electronDist 指向本机已解压的 Electron（默认 ~/.dsh/electron），由 scripts/dist.mjs 注入，
 #      避免每次打包都从 GitHub 重新下一套 110 MB —— 这台机器 github.com 不通。
 #   3. asar 打开：素材（webm 51 MB）留在包内由主进程 fs 读取；没有原生模块需要 unpack。
-appId: com.pc2005.dsh-pet
-productName: dsh-pet
+appId: io.github.q3579338.codex-bigfish
+productName: Codex-BigFish
 copyright: dsh-pet contributors
 
 directories:
@@ -31,11 +31,21 @@ files:
   - assets/sound/**
   - assets/config.jsonc
   - assets/logo.png
+  - assets/main-character.png
+  - LICENSE
   - package.json
   - '!node_modules/**'
 
 asar: true
 npmRebuild: false
+
+extraFiles:
+  - from: LICENSE
+    to: LICENSE
+  - from: ../CODEX.md
+    to: CODEX-README.md
+  - from: ../CODEX-VALIDATION.md
+    to: CODEX-VALIDATION.md
 
 # 与 package.json 的 @electron/get 默认下载版本保持一致；改版本时两处一起改
 electronVersion: 43.3.0

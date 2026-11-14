@@ -18,11 +18,12 @@ function mountProtocolSelect() {
   if (!host) return;
   protocolSelect = createSelect(
     [
+      { value: 'codex', label: '本机 Codex（沿用已有登录）' },
       { value: 'openai-compatible', label: 'OpenAI 兼容' },
       { value: 'anthropic', label: 'Anthropic' },
     ],
     'openai-compatible',
-    () => forgetModelOptions(),
+    () => { forgetModelOptions(); syncProtocolFields(); },
   );
   protocolSelect.root.firstElementChild.setAttribute('aria-labelledby', 'protocol-label');
   host.append(protocolSelect.root);

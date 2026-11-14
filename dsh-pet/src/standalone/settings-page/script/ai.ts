@@ -13,6 +13,17 @@ const AI_SETTINGS_URL = '/standalone-ai/settings';
 const AI_TEST_URL = '/standalone-ai/test';
 const AI_BALANCE_URL = '/standalone-ai/balance';
 
+function syncProtocolFields() {
+  const codex = protocolSelect && protocolSelect.getValue() === 'codex';
+  for (const id of ['baseUrl', 'apiKey', 'deepseekApiKey', 'balance-provider-host']) {
+    const field = byId(id) && byId(id).closest('.field');
+    if (field) field.hidden = codex;
+  }
+  if (byId('codex-note')) byId('codex-note').hidden = !codex;
+  byId('model').placeholder = codex ? 'default：跟随本机 Codex，或从列表选择' : '填写或拉取模型 ID';
+  if (codex && !byId('model').value.trim()) byId('model').value = 'default';
+}
+
 async function aiRequest(method, body) {
   const response = await fetch(AI_SETTINGS_URL, {
     method: method,
@@ -47,6 +58,7 @@ function populateAi(data) {
   byId('deepseek-key-actions').hidden = data.hasDeepseekKey !== true;
   byId('deepseekApiKey').value = '';
   byId('deepseekApiKey').disabled = false;
+  syncProtocolFields();
 }
 
 /** 把余额结果翻成一行可读文案；失败一律说明原因，不显示伪造数字。 */

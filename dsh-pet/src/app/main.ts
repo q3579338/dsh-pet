@@ -7,6 +7,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,6 +24,10 @@ import { createRequestSecurity } from '../standalone/request-security.ts';
 import { installDesktopAuth, type DesktopSession } from './desktop-auth.ts';
 import { startRouter } from './router.ts';
 import { ROUTE_SEGMENT } from '../shared/constants.ts';
+import { seedCodexProfile, useCodexProfile } from '../standalone/codex/profile.ts';
+import { createCodexAttachments } from '../standalone/codex/attachments.ts';
+
+useCodexProfile();
 
 /**
  * `electron` 由 Electron 运行时提供，不是本包依赖；只声明实际用到的成员。
@@ -35,6 +40,9 @@ interface WebContentsLike {
   ): void;
 }
 interface ElectronApp {
+  setName(name: string): void;
+  getPath(name: 'appData'): string;
+  setPath(name: 'userData', path: string): void;
   whenReady(): Promise<void>;
   requestSingleInstanceLock(): boolean;
   exit(code?: number): void;
@@ -42,9 +50,12 @@ interface ElectronApp {
   on(event: 'second-instance', listener: () => void): void;
   on(event: 'will-quit', listener: () => void): void;
 }
-const { app, session } = createRequire(import.meta.url)('electron') as {
+const { app, session, nativeImage } = createRequire(import.meta.url)('electron') as {
   app: ElectronApp;
   session: { defaultSession: DesktopSession };
+  nativeImage: {
+    createFromBuffer(buffer: Buffer): { isEmpty(): boolean; getSize(): { width: number; height: number } };
+  };
 };
 
 /** 包根目录：与 helper-process.ts 的 packageRoot 同一口径（模块所在目录的上一级） */
@@ -53,6 +64,12 @@ const packageRoot = resolve(here, '..');
 const helperMain = join(packageRoot, 'runtime', 'electron-helper', 'main.js');
 
 const log = (message: string): void => console.log(`[dsh-pet-app] ${message}`);
+
+// 单实例锁按 userData 隔离：不能占用原版或 Codex 自己的 Chromium 配置目录。
+app.setName('Codex-BigFish');
+const electronProfile = join(app.getPath('appData'), 'codex-bigfish');
+mkdirSync(electronProfile, { recursive: true });
+app.setPath('userData', electronProfile);
 
 /** 单实例：第二次双击直接退出（共用 userData 的 Chromium profile 会互踢） */
 const locked = app.requestSingleInstanceLock();
@@ -69,6 +86,7 @@ if (!locked) {
  * 而 Helper 又必须在 ready 之前被 require（内部有 `app.commandLine.appendSwitch`，ready 后再加不生效）。
  */
 async function boot(): Promise<void> {
+  seedCodexProfile(configPathsFor(packageRoot, dshHomeDir()));
   // 独立应用没有控制台：插件日志、standalone 日志与同进程 Helper/渲染端的 console 全部落盘。
   // 原始 console 方法要先快照——包装后的 console 会转给文件 logger，logger 的 base 必须指向原始方法，
   // 否则 logger → console → logger 无限递归。
@@ -110,6 +128,10 @@ async function boot(): Promise<void> {
     logger,
     routes,
     ai,
+    attachments: createCodexAttachments(dshHomeDir(), (bytes) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+      return image.isEmpty() ? undefined : image.getSize();
+    }),
     authenticatedUrl: security.authenticatedUrl,
   });
 

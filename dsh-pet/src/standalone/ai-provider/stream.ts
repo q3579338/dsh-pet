@@ -10,6 +10,7 @@ import { isAuthenticationFailure, isRateLimitFailure, sdkTextStream, type AiTran
 import { MAX_EVENTS, MAX_OUTPUT_CHARS } from './limits.ts';
 import { abortable, parseRequest } from './request.ts';
 import type { AiRuntime } from './types.ts';
+import { codexTextStream } from '../codex/transport.ts';
 
 /** 本层自己写的固定文案：只有这些能原样透出给调用方。 */
 const OWN_MESSAGES: readonly string[] = [
@@ -20,6 +21,10 @@ const OWN_MESSAGES: readonly string[] = [
 
 /** 把传输层异常归一成可示人的错误；鉴权失败顺带置位暂停，等用户重新保存设置。 */
 function normalizeFailure(runtime: AiRuntime, controller: AbortController, error: unknown): Error {
+  if (runtime.store.current().protocol === 'codex') {
+    if (controller.signal.aborted) return new Error('Codex 回复已停止或超时，请重试。', { cause: error });
+    return new Error('本机 Codex 暂未能回复。请在设置中检查 Codex 连接、登录状态与模型。', { cause: error });
+  }
   if (isAuthenticationFailure(error)) {
     runtime.paused = true;
     runtime.logger.warn('Standalone AI authentication failed; save settings again to resume.');
@@ -49,7 +54,11 @@ export function createTextStream(
   return async function* stream(options) {
     if (!runtime.ready()) throw new Error('Standalone AI is not ready. Configure and enable the model first.');
     const settings = runtime.store.current();
-    const { request, signal: callerSignal } = parseRequest(options, settings.model);
+    const { request, signal: callerSignal } = parseRequest(
+      options,
+      settings.model,
+      settings.protocol === 'codex' ? runtime.imageUrl : undefined,
+    );
     if (callerSignal?.aborted) throw new Error('Standalone AI request cancelled.');
     if (runtime.active) throw new Error('Standalone AI is busy. Please wait.');
     const controller = new AbortController();
@@ -57,7 +66,11 @@ export function createTextStream(
     const abort = () => controller.abort();
     callerSignal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(abort, settings.timeoutMs);
-    const iterator = sdkTextStream(settings, request, controller.signal, runtime.fetcher)[Symbol.asyncIterator]();
+    const transport =
+      settings.protocol === 'codex'
+        ? codexTextStream(settings, request, controller.signal, runtime.codexEvents)
+        : sdkTextStream(settings, request, controller.signal, runtime.fetcher);
+    const iterator = transport[Symbol.asyncIterator]();
     let emitted = 0;
     let events = 0;
     try {

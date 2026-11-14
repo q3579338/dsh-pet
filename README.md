@@ -1,5 +1,7 @@
 # dsh-pet 🐾
 
+> **本 fork：大肥鱼 · Codex 适配版。** 保留原角色、动画与互动，使用本机已登录的 Codex，不需要安装 DeepSeek。Windows 使用、构建和适配范围见 **[CODEX.md](CODEX.md)**。下方保留上游原始文档，涉及 DeepSeek 的安装步骤适用于上游版本。
+
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-pet"><img alt="npm version" src="https://img.shields.io/npm/v/dsh-pet?label=npm&color=blue"></a>
   <a href="https://www.npmjs.com/package/dsh-pet"><img alt="npm monthly downloads" src="https://img.shields.io/npm/dm/dsh-pet?label=%E6%9C%88%E4%B8%8B%E8%BD%BD&color=brightgreen"></a>

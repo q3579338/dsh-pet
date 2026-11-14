@@ -21,6 +21,8 @@ export interface AiTextMessage {
 export interface AiRequest {
   system: string;
   messages: AiTextMessage[];
+  /** Codex 当前轮的显式附图；普通 API 仍沿用原文本协议。 */
+  images?: string[];
 }
 /** 传输事件：只有文本增量与拒绝标记。 */
 export type AiTransportEvent = { text?: string; refusal?: boolean };
