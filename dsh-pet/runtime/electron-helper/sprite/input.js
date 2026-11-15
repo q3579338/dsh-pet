@@ -75,7 +75,8 @@ Object.assign(PetSprite.prototype, {
     // 弹弓：按下时记时刻、按下时比对——间隔 = 两次按下之间的距离，与这次拖了多久无关，
     // 也没有「待拉」状态或超时清理。
     const pressNow = performance.now();
-    const sling = pressNow - this.lastPressAt < S.SLINGSHOT_DOUBLE_MS;
+    const chatOnDoubleClick = typeof window.petBridge?.openChat === 'function' && !e.shiftKey;
+    const sling = !chatOnDoubleClick && pressNow - this.lastPressAt < S.SLINGSHOT_DOUBLE_MS;
     this.lastPressAt = sling ? 0 : pressNow; // 命中就清掉，免得连点三下弹两次
     this.hit.classList.add('dragging');
     // 收起悬浮提示：拖拽期间指针始终在身体内，不主动收提示会跟着宠物一路飘（松手后由 onPointerUp 复位）
@@ -441,6 +442,11 @@ Object.assign(PetSprite.prototype, {
 
   /** 悬停快捷键：按住 M 说话、L 开对话、S 截图、Z 切换睡/醒、D 开关待办、1-4 切显示位置。 */
   onHotkey(e) {
+    if (this.hoverBody && S.isHearHotkey(e) && typeof window.petBridge?.openChat === 'function') {
+      e.preventDefault();
+      if (!e.repeat) window.petBridge.openChat();
+      return;
+    }
     // 按住说话先判：它要吃掉按住期间的自动重复，晚一步就会被输入框收走
     if (this.hearHold.onKeyDown(e)) {
       e.preventDefault();

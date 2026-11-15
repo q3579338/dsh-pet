@@ -27,6 +27,7 @@ import { seedCodexProfile, useCodexProfile } from '../standalone/codex/profile.t
 import { createCodexAttachments } from '../standalone/codex/attachments.ts';
 import { startDesktopEntry, revealExistingWindows, type StartupApp, type DpiScreen } from './startup.ts';
 import { writeStandaloneRuntime } from '../standalone/runtime-state.ts';
+import { createCompanionWindow, type CompanionWindow } from './companion-window.ts';
 
 useCodexProfile();
 
@@ -43,13 +44,18 @@ interface WebContentsLike {
 interface ElectronApp extends StartupApp {
   quit(): void;
   on(event: 'web-contents-created', listener: (event: unknown, contents: WebContentsLike) => void): void;
-  on(event: 'second-instance', listener: () => void): void;
+  on(event: 'second-instance', listener: (event: unknown, args: string[]) => void): void;
+  on(event: 'codex-bigfish:chat', listener: (view?: 'chat' | 'config') => void): void;
   on(event: 'will-quit', listener: () => void): void;
 }
-const { app, session, nativeImage, screen, BrowserWindow } = createRequire(import.meta.url)('electron') as {
+const { app, session, nativeImage, screen, BrowserWindow, ipcMain } = createRequire(import.meta.url)('electron') as {
   app: ElectronApp;
   screen: DpiScreen;
-  BrowserWindow: { getAllWindows(): Array<{ isDestroyed(): boolean; isVisible(): boolean; showInactive(): void }> };
+  BrowserWindow: {
+    new (options: Record<string, unknown>): CompanionWindow;
+    getAllWindows(): Array<{ isDestroyed(): boolean; isVisible(): boolean; showInactive(): void }>;
+  };
+  ipcMain: { on(event: 'codex-bigfish:chat', listener: () => void): void };
   session: { defaultSession: DesktopSession };
   nativeImage: {
     createFromBuffer(buffer: Buffer): { isEmpty(): boolean; getSize(): { width: number; height: number } };
@@ -128,6 +134,13 @@ async function boot(): Promise<void> {
   const server = await startRouter(routes, { security, ai, log, status, landingPage });
   port = server.port;
   const origin = `http://127.0.0.1:${port}`;
+  const companion = createCompanionWindow({
+    create: (options) => new BrowserWindow(options),
+    settingsUrl: security.authenticatedUrl(origin),
+    log,
+  });
+  ipcMain.on('codex-bigfish:chat', () => companion.open());
+  app.on('codex-bigfish:chat', (view) => companion.open(view));
   log(`本机服务 ${origin}`);
   const releaseRuntime = writeStandaloneRuntime(dshHomeDir(), {
     name: 'dsh-pet-app',
@@ -141,6 +154,7 @@ async function boot(): Promise<void> {
   // 先把「我自己就是应用」告诉插件，再 apply：apply 内部据此短路 spawn 与下载
   process.env.DSH_PET_IN_PROCESS = '1';
   process.env.DSH_PET_APP_MODE = '1';
+  process.env.DSH_PET_NATIVE_CHAT = '1';
   // 独立模式点首项打开的是本机 AI 设置页，不是 DSH 站点：形态必须显式标成 standalone。
   process.env.DSH_PET_OPEN_TARGET = 'standalone';
   // 不注入宿主 PID：helper 的「宿主没了就退出」只对双进程有意义，同进程里设了会自己杀自己
@@ -171,6 +185,8 @@ async function boot(): Promise<void> {
       join(packageRoot, 'runtime/electron-helper/index.html'),
       security.token,
     );
+    if (process.argv.includes('--chat') || process.argv.includes('--chat-no-focus'))
+      companion.open('chat', !process.argv.includes('--chat-no-focus'));
   });
   process.env.DSH_PET_APP_TOKEN = security.token;
   try {
@@ -179,7 +195,11 @@ async function boot(): Promise<void> {
     delete process.env.DSH_PET_APP_TOKEN;
   }
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, args) => {
+    if (args.includes('--chat')) {
+      companion.open();
+      return;
+    }
     revealExistingWindows(BrowserWindow.getAllWindows());
     log('已显示正在运行的大肥鱼');
   });

@@ -118,6 +118,13 @@ function createTray({
       });
     };
     return Menu.buildFromTemplate([
+      ...(process.env.DSH_PET_NATIVE_CHAT === '1'
+        ? [
+            { label: '打开聊天 / 语音', click: () => app.emit('codex-bigfish:chat', 'chat') },
+            { label: 'Codex 额度与设置', click: () => app.emit('codex-bigfish:chat', 'config') },
+            { type: 'separator' },
+          ]
+        : []),
       ...pets.map((pet) => ({
         label: pet.name || pet.id,
         type: 'checkbox',

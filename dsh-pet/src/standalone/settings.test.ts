@@ -83,7 +83,7 @@ interface Page {
  *
  * 每个 test 都新建，避免用例之间互相污染——脚本在启动时会发请求、改元素状态。
  */
-async function setupPage(): Promise<Page> {
+async function setupPage(search = ''): Promise<Page> {
   const elements = new Map<string, FakeElement>();
   const element = (id: string): FakeElement => {
     if (!elements.has(id))
@@ -163,7 +163,7 @@ async function setupPage(): Promise<Page> {
       removeEventListener() {},
       body,
     },
-    location: { hash: '#token=process-capability', pathname: '/standalone-ai/' },
+    location: { hash: '#token=process-capability', pathname: '/standalone-ai/', search },
     history: {
       replaceState: (_a: unknown, _b: unknown, path: string) => {
         stripped = path;
@@ -308,6 +308,12 @@ test('启动：地址片段被清掉，密钥框清空并显示已保存', async
     page.aiRequests().every(({ options }) => options.headers['X-DSH-Pet-Token'] === 'process-capability'),
     'AI 请求必须带本次运行的访问令牌',
   );
+});
+
+test('原生设置入口保留页面选择参数，同时移除访问令牌片段', async () => {
+  const page = await setupPage('?view=config');
+  assert.equal(page.stripped(), '/standalone-ai/?view=config');
+  assert.doesNotMatch(page.stripped(), /token/);
 });
 
 test('保存：密钥只写不回显，且不再提交启用位', async () => {

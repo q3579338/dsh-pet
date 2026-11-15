@@ -38,6 +38,7 @@ Object.assign(PetSprite.prototype, {
       { label: '碎碎念', action: 'whisper' },
       { label: '对话', action: 'chat', hint: S.CHAT_HOTKEY_HINT },
     ];
+    if (typeof window.petBridge?.openChat === 'function') tools.push({ label: '语音对话', action: 'chat' });
     // 「配图」：与浏览器端同一份分支（纳入对话的配图 / 其他），点一张就用它说一句；没有可用图时
     // 返回 null，整项不出现。数据来自拍平层吹入的条目级字段（this.pet.memes / chatImageEnabled /
     // chatImageLimit），与网页端同一个 flattenConfigPets；缩略图走 BASE 的 /pic/memes 绝对地址
@@ -290,6 +291,10 @@ Object.assign(PetSprite.prototype, {
   },
 
   showChatFromMenu(image, encoded) {
+    if (!image && !encoded && typeof window.petBridge?.openChat === 'function') {
+      window.petBridge.openChat();
+      return;
+    }
     if (this.chatMount) {
       this.chatMount.close();
       this.chatMount = null;
@@ -333,6 +338,10 @@ Object.assign(PetSprite.prototype, {
   // 快捷键「按住 M 说话」的两端：按下时若没有弹窗就先开一个，再让它开录；松开只收尾、不关窗，
   // 识别结果落进输入框等用户确认（不自动发送）。
   startHearChat() {
+    if (typeof window.petBridge?.openChat === 'function') {
+      window.petBridge.openChat();
+      return;
+    }
     if (!this.chatMount) this.showChatFromMenu();
     if (this.chatMount) this.chatMount.startHear();
   },

@@ -228,6 +228,7 @@ function createWindows({
       focusable: true,
       webPreferences: {
         preload: path.join(helperDir, 'preload.js'),
+        additionalArguments: process.env.DSH_PET_NATIVE_CHAT === '1' ? ['--codex-companion-chat'] : [],
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: false,

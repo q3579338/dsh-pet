@@ -7,12 +7,13 @@
 ## Windows 使用
 
 1. 将整个 Windows 压缩包解压到一个目录，双击 `Codex-BigFish.exe`。旁边的 `resources` 等文件必须一起保留。
-   升级前先从托盘退出旧版；同一数据目录只运行一个实例。再次打开会显示已有宠物，设置页底部可核对版本号。`0.4.9-codex.4` 修复启动缩放探测、聊天气泡与语音接入。
+   升级前先从托盘退出旧版；同一数据目录只运行一个实例。设置页底部可核对版本号。`0.4.9-codex.5` 增加独立的原生聊天窗口，双击大肥鱼、右键「对话／语音对话」或托盘「打开聊天／语音」都能打开；重复打开复用窗口并保留草稿。原拖拽、抛掷和单击动画保留；弹弓手势改用 Shift 加双击按下。
 2. 本机需已有可运行并已登录的 Codex。默认自动寻找 `codex.exe`，也识别指向它的 Windows `codex.cmd`。找不到时，可用环境变量 `DSH_PET_CODEX_PATH` 指定可执行文件的完整路径，然后重新打开大肥鱼。
 3. 右键大肥鱼，打开 AI 设置，协议选择「本机 Codex（沿用已有登录）」，点击检查连接。模型为 `default` 时跟随本机 Codex 默认设置，也可读取当前账号可用的模型列表。
 4. 打开原版聊天面板即可聊天。聊天和开启后的自动碎碎念会使用当前 Codex 连接的额度或计费。初次启动默认关闭自动碎碎念；可在宠物设置中自行开启，原版功能仍然保留。
 5. 在配置页点击「刷新 Codex 额度与用量」，查看当前套餐、接口提供的窗口剩余额度和重置时间、额外 Credits、重置次数及 Token 活动。右键原来的余额菜单也能查询，点击气泡可在额度和统计页面之间切换。
-6. 对话框和设置页聊天区都可「按住说话」；松开后识别结果填入输入框，检查后再发送。Windows 版默认使用「Windows 本机识别（中文）」与「Windows 本机朗读」。手动播报控制聊天回复是否念出；已有明确关闭的设置会保留，可在「桌宠配置 → 语音」开启。自动碎碎念、通知和待办的播报开关继续独立。
+6. 聊天窗口可「按住说话」；松开后识别结果填入输入框，检查后再发送。悬停大肥鱼按 M 可打开语音对话窗口，再按住窗口的话筒。Windows 版默认使用「Windows 本机识别（中文）」与「Windows 本机朗读」。手动播报控制聊天回复是否自动念出，每条回复旁也可点击喇叭朗读。已有明确关闭的设置会保留，可在「桌宠配置 → 语音」开启。自动碎碎念、通知和待办的播报开关继续独立。
+7. 托盘「Codex 额度与设置」打开同一窗口的连接页，可查询真实额度、用量、可用模型并检查连接。需要直接打开聊天时，可以使用 `Codex-BigFish.exe --chat`；程序已运行时也会打开现有聊天窗口。默认仅启动桌宠，不自动抢键盘焦点。
 
 大肥鱼的偏好、聊天记忆与日志默认在 `%USERPROFILE%\.codex-bigfish`，Electron 窗口配置在 `%APPDATA%\codex-bigfish`。不会覆盖 Codex、原 DSH 或原版桌宠的数据。`DSH_HOME` 可以覆盖大肥鱼的数据目录；应使用独立目录。
 
@@ -54,6 +55,6 @@ npm run build
 
 原作者：[PC2005-cloud/dsh-pet](https://github.com/PC2005-cloud/dsh-pet)。代码沿用 [MIT License](LICENSE)，保留原作者声明。
 
-Codex 连接复用、代理继承、可用模型选择与错误处理参考 [bianbian-666/Codex-dafeiyu](https://github.com/bianbian-666/Codex-dafeiyu)。实现适配到本分支原有的类型、生命周期和注册表；其版权与 MIT 许可保留在 [CODEX-THIRD-PARTY-NOTICES.txt](CODEX-THIRD-PARTY-NOTICES.txt)。Windows 本机语音与设置页话筒入口由本分支新增。
+Codex 连接复用、代理继承、可用模型选择、错误处理与普通原生管理窗口的方案参考 [bianbian-666/Codex-dafeiyu](https://github.com/bianbian-666/Codex-dafeiyu)。实现适配到本分支原有的类型、生命周期和注册表；其版权与 MIT 许可保留在 [CODEX-THIRD-PARTY-NOTICES.txt](CODEX-THIRD-PARTY-NOTICES.txt)。Windows 本机语音与设置页话筒入口由本分支新增。
 
 按上游说明，宠物原型「溟月」来自 B 站 [@上善无形](https://space.bilibili.com/4456176)，DeepSeek 女仆鲸鱼娘设计来自 [@ZipZipPipe](https://space.bilibili.com/4168597)。形象遵循 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans)，素材禁止商用，二创公开分发应署名并按原许可共享。保留原始[授权声明链接](https://www.bilibili.com/opus/1247156596114456581)和上游 README 中的完整说明。

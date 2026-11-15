@@ -215,6 +215,16 @@ Object.assign(PetSprite.prototype, {
     this.hit.addEventListener('pointerdown', (e) => this.onPointerDown(e), { signal: ac.signal });
     this.hit.addEventListener('pointermove', (e) => this.onPointerMove(e), { signal: ac.signal });
     this.hit.addEventListener('click', (e) => this.onClick(e), { signal: ac.signal });
+    this.hit.addEventListener(
+      'dblclick',
+      (e) => {
+        if (e.shiftKey || typeof window.petBridge?.openChat !== 'function') return;
+        e.preventDefault();
+        this.stopThrow();
+        window.petBridge.openChat();
+      },
+      { signal: ac.signal },
+    );
     this.hit.addEventListener('contextmenu', (e) => this.onContextMenu(e), { signal: ac.signal });
     window.addEventListener('pointerup', (e) => this.onPointerUp(e), { signal: ac.signal });
     window.addEventListener('pointercancel', (e) => this.onPointerUp(e), { signal: ac.signal });

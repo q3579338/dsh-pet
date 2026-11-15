@@ -58,4 +58,11 @@ test('only the local main renderer receives the capability, scoped to the API or
   ]) {
     assert.equal(send(url, ownFrame)['X-DSH-Pet-Token'], undefined);
   }
+  const nativeChat = { url: 'http://127.0.0.1:3080/standalone-ai/?view=chat', parent: null };
+  assert.equal(send(endpoint, nativeChat)['X-DSH-Pet-Token'], 'private-token');
+  assert.equal(send('http://127.0.0.1:3080/standalone-ai/settings', nativeChat)['X-DSH-Pet-Token'], 'private-token');
+  assert.equal(send('http://127.0.0.1:3080/standalone-ai/balance', nativeChat)['X-DSH-Pet-Token'], 'private-token');
+  assert.equal(send('https://example.invalid/standalone-ai/settings', nativeChat)['X-DSH-Pet-Token'], undefined);
+  assert.equal(send(endpoint, { ...nativeChat, parent: {} })['X-DSH-Pet-Token'], undefined);
+  assert.equal(send(endpoint, { ...nativeChat, url: 'http://127.0.0.1:3080/other' })['X-DSH-Pet-Token'], undefined);
 });

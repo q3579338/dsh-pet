@@ -182,9 +182,19 @@ export function createHearControl(opts: HearControlOptions): HearControl {
         return;
       }
     } catch (e) {
+      if (lifetime.signal.aborted) return;
       hearState = 'idle';
       paint();
-      hint.flash('打不开麦克风：' + (e instanceof Error ? e.message : String(e)));
+      const name = e && typeof e === 'object' && 'name' in e && typeof e.name === 'string' ? e.name : '';
+      const reason =
+        name === 'NotAllowedError'
+          ? '麦克风未获授权，请允许大肥鱼使用麦克风。'
+          : name === 'NotFoundError'
+            ? '没有找到麦克风，请连接设备后重试。'
+            : name === 'NotReadableError'
+              ? '麦克风无法读取，可能正被其他程序占用。'
+              : '打不开麦克风：' + (e instanceof Error ? e.message : String(e));
+      hint.flash(reason);
       return;
     }
     if (wasReleasedEarly) {

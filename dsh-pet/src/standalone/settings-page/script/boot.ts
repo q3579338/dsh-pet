@@ -141,7 +141,7 @@ async function loadAi() {
 
 function boot() {
   wireTabs();
-  selectTab('chat');
+  selectTab(new URLSearchParams(location.search).get('view') === 'config' ? 'config' : 'chat');
   // 刷新后地址栏里的令牌已被清掉，此时靠首次访问换来的 HttpOnly cookie 继续；
   // cookie 也没了的时候，各面板自己的请求会失败并显示重新打开设置的提示。
   mountProtocolSelect();

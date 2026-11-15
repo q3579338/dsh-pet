@@ -2,8 +2,8 @@
  * 桌面应用出站请求的访问凭证注入。
  *
  * 只负责给「本机渲染端发起、目标为插件路由」的请求附加令牌；不生成、不校验令牌（校验在宿主路由侧）。
- * 依赖 Electron 的 session 请求拦截与 file:// 渲染页。始终成立：令牌只进请求头，且只对顶层渲染端
- * 指向本机 origin 的插件路由生效，重定向目标不携带。
+ * 依赖 Electron 的 session 请求拦截、file 渲染页与本机聊天页。令牌只进请求头，且只对可信顶层页
+ * 指向本机 origin 的自有接口生效，重定向和其它页面不携带。
  * @module dsh-pet/src/app/desktop-auth
  */
 
@@ -52,13 +52,14 @@ export function installDesktopAuth(session: DesktopSession, origin: string, rend
       const target = new URL(details.url);
       const frame = details.frame;
       const page = frame ? new URL(frame.url) : undefined;
+      const ownFile = page?.protocol === 'file:' && page.href.split(/[?#]/, 1)[0] === renderer;
+      const ownChat = page?.origin === origin && page.pathname === '/standalone-ai/';
+      const pluginApi = target.pathname.startsWith(ROUTE_SEGMENT + '/');
+      const chatApi = target.pathname.startsWith('/standalone-ai/');
       if (
         target.origin === origin &&
-        target.pathname.startsWith(ROUTE_SEGMENT + '/') &&
         frame?.parent === null &&
-        page?.protocol === 'file:' &&
-        page.origin === 'null' &&
-        page.href.split(/[?#]/, 1)[0] === renderer
+        ((ownFile && pluginApi) || (ownChat && (pluginApi || chatApi)))
       ) {
         headers['X-DSH-Pet-Token'] = token;
       }
