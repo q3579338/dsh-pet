@@ -66,6 +66,31 @@ test('POST /voice/speak 成功：交回音频文件与实现声明的 MIME', asy
   assert.deepEqual(result, { kind: 'file', file: '/cache/a.mp3', contentType: 'audio/mpeg' });
 });
 
+test('流式路由保持所选音色和取消信号，缓存及旧 provider 可返回完整音频', async () => {
+  const deps = makeDeps(async () => ({ ok: true, file: '/cache/a.mp3', contentType: 'audio/mpeg' }));
+  const signal = new AbortController().signal;
+  const stream = (async function* () {
+    yield new Uint8Array([1]);
+  })();
+  const dispose = (): void => {};
+  deps.voice.stream = async (raw, received) => {
+    assert.deepEqual(raw, { text: '你好', voice: 'bigfish-cute/dango-v1' });
+    assert.equal(received, signal);
+    return { ok: true, stream, dispose, contentType: 'audio/mpeg' };
+  };
+  const result = await handleVoiceRoutes(deps, {
+    ...input('voice/stream', 'POST', '{"text":"你好","voice":"bigfish-cute/dango-v1"}'),
+    signal,
+  });
+  assert.deepEqual(result, { kind: 'stream', stream, dispose, contentType: 'audio/mpeg' });
+  delete deps.voice.stream;
+  assert.deepEqual(await handleVoiceRoutes(deps, input('voice/stream', 'POST', '{"text":"你好"}')), {
+    kind: 'file',
+    file: '/cache/a.mp3',
+    contentType: 'audio/mpeg',
+  });
+});
+
 test('POST /voice/speak 成功：WAV 实现的 MIME 原样透传，不在路由里写死', async () => {
   const result = await handleVoiceRoutes(
     makeDeps(async () => ({ ok: true, file: '/cache/a.wav', contentType: 'audio/wav' })),

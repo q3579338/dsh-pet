@@ -8,6 +8,29 @@ import type { EdgeSynthInput } from './edge.ts';
 
 afterEach(resetVoiceProviders);
 
+test('流式和完整音频使用完全相同的真实音色、音高与节奏', async () => {
+  const calls: EdgeSynthInput[] = [];
+  const provider = createCuteVoiceProvider(
+    async (input) => {
+      calls.push(input);
+      return new Uint8Array([1]);
+    },
+    async function* (input) {
+      calls.push(input);
+      yield new Uint8Array([1]);
+    },
+  );
+  for (const preset of CUTE_VOICES) {
+    const signal = new AbortController().signal;
+    const input = { text: '不要改变音色', voice: preset.id, rate: 7, signal };
+    await provider.synthesize(input);
+    for await (const chunk of provider.stream!(input)) {
+      assert.ok(chunk.length);
+    }
+    assert.deepEqual(calls[calls.length - 1], calls[calls.length - 2]);
+  }
+});
+
 test('四种风格确实将基底声线、音高和节奏传给引擎', async () => {
   const calls: EdgeSynthInput[] = [];
   const bytes = new Uint8Array([7, 3]);

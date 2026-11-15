@@ -8,6 +8,8 @@
 import { createReadStream, existsSync, fstatSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join, normalize, sep } from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 /** 不同扩展名对应的 Content-Type 映射 */
 export const MIME: Record<string, string> = {
@@ -214,11 +216,23 @@ export function sendText(res: ServerResponse, status: number, body: string): voi
   res.end(body);
 }
 
+/** 首字节已确认的音频流：背压由管道处理，断连及失败均释放合成订阅。 */
+export async function sendStream(res: ServerResponse, result: Extract<RouteResult, { kind: 'stream' }>): Promise<void> {
+  try {
+    if (res.destroyed || res.writableEnded) return;
+    res.writeHead(200, { 'content-type': result.contentType, 'cache-control': 'no-store' });
+    await pipeline(Readable.from(result.stream), res);
+  } finally {
+    result.dispose();
+  }
+}
+
 /** 单次业务路由的应答（WebServer 注册与桌面 Helper 管道共用的同一契约；消费方各自落盘） */
 export type RouteResult =
   | { kind: 'json'; status: number; obj: unknown; headers?: Record<string, string> }
   | { kind: 'text'; status: number; body: string }
   | { kind: 'file'; file: string; contentType: string }
+  | { kind: 'stream'; stream: AsyncIterable<Uint8Array>; contentType: string; dispose(): void }
   /** 无需应答：调用方在挂起等待期间已断开（见 /playback 的等待分支）——消费方直接收尾，不写 */
   | { kind: 'none' };
 

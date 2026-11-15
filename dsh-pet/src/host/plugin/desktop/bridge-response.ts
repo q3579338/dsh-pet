@@ -22,6 +22,10 @@ const JSON_UTF8 = 'application/json; charset=utf-8';
  * @returns 应答体；`none` 落成空的 204。
  */
 export function toBridgeResponse(id: number, result: RouteResult): BridgeResponse {
+  if (result.kind === 'stream') {
+    result.dispose();
+    return { id, status: 501, contentType: TEXT_UTF8, body: 'Streaming audio requires the HTTP chat window' };
+  }
   if (result.kind === 'file') {
     // 素材只给绝对路径，主进程自行读盘：几十 MB 的视频不进管道。
     return { id, status: 200, contentType: result.contentType, file: result.file };

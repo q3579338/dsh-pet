@@ -14,6 +14,21 @@ import assert from 'node:assert/strict';
 import { toBridgeResponse } from './bridge-response.ts';
 
 describe('toBridgeResponse —— 路由结果 → 管道应答', () => {
+  test('旧管道不缓存音频流，明确拒绝并释放订阅', () => {
+    let disposed = false;
+    const result = toBridgeResponse(6, {
+      kind: 'stream',
+      contentType: 'audio/mpeg',
+      stream: (async function* () {
+        yield new Uint8Array([1]);
+      })(),
+      dispose: () => {
+        disposed = true;
+      },
+    });
+    assert.equal(result.status, 501);
+    assert.equal(disposed, true);
+  });
   test('素材：恒 200，只带文件路径与类型（正文由主进程读盘）', () => {
     const res = toBridgeResponse(7, { kind: 'file', file: '/tmp/a.webm', contentType: 'video/webm' });
     assert.deepEqual(res, { id: 7, status: 200, contentType: 'video/webm', file: '/tmp/a.webm' });

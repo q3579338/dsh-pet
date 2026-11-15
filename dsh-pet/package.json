@@ -1,6 +1,6 @@
 {
   "name": "dsh-pet",
-  "version": "0.4.9-codex.11",
+  "version": "0.4.9-codex.12",
   "private": true,
   "description": "PC2005-cloud/dsh-pet 的 Codex 适配分支：保留大肥鱼角色、原版动画与互动，使用本机已有 Codex 登录。",
   "icon": "assets/logo.png",

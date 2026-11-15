@@ -305,16 +305,36 @@ export function composerNode(
           h('span', { className: 'pet-chat-composer-spacer' }),
           live
             ? h('label', {
-                className: 'pet-chat-live-style',
+                className: 'pet-chat-live-style pet-chat-live-mode',
+                children: [
+                  h('span', { children: '语音模式' }),
+                  h('select', {
+                    'aria-label': '语音聊天模式',
+                    title:
+                      '原声直接播放，延迟更低；自定义音色使用星铃、糖芽、团子等实际音色，逐段合成播放。结束当前通话后可切换。',
+                    value: live.mode,
+                    disabled: live.active,
+                    onChange: (event: { target: { value: string } }) => live.chooseMode(event.target.value),
+                    children: [
+                      h('option', { value: 'natural', children: '低延迟原声' }),
+                      h('option', { value: 'custom', children: '自定义音色' }),
+                    ],
+                  }),
+                ],
+              })
+            : null,
+          live && live.mode === 'custom'
+            ? h('label', {
+                className: 'pet-chat-live-style pet-chat-live-tone',
                 children: [
                   h('span', { children: '聊天音色' }),
                   h('select', {
                     'aria-label': '语音聊天音色',
-                    title: '连接前选择实际朗读音色；本次窗口内保留。Codex 原声直接播放，其他音色逐句合成。',
+                    title: '选择实际朗读音色；本次窗口内保留，切换模式不会丢失所选音色。',
                     value: live.styleId,
                     disabled: live.active,
                     onChange: (event: { target: { value: string } }) => live.chooseStyle(event.target.value),
-                    children: LIVE_VOICE_STYLES.map((style) =>
+                    children: LIVE_VOICE_STYLES.filter((style) => style.synthesisVoice).map((style) =>
                       h('option', { key: style.id, value: style.id, children: style.name }),
                     ),
                   }),

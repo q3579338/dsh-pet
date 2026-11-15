@@ -95,3 +95,36 @@ function waitForVoiceRetry(ms: number, signal?: AbortSignal): Promise<void> {
 export async function synthesize(input: EdgeSynthInput): Promise<Uint8Array> {
   return retryVoiceRateLimit(() => synthesizeOnce(input), input.signal);
 }
+
+/** SDK 的流式接口使用相同 SSML 参数；仅在首字节之前允许限流重试，避免重复播出。 */
+export async function* synthesizeStream(input: EdgeSynthInput): AsyncGenerator<Uint8Array> {
+  const mod = (await import('@andresaya/edge-tts')) as EdgeTtsModule & { default?: EdgeTtsModule };
+  const EdgeTTS = mod.EdgeTTS ?? mod.default?.EdgeTTS;
+  if (!EdgeTTS) throw new VoiceSynthError('依赖未导出 EdgeTTS');
+  const started = await retryVoiceRateLimit(async () => {
+    const iterator = new EdgeTTS().synthesizeStream(input.text, input.voice, {
+      rate: input.rate,
+      ...(input.pitch === undefined ? {} : { pitch: input.pitch }),
+      signal: input.signal,
+      timeout: SYNTHESIS_TIMEOUT_MS,
+    });
+    try {
+      const first = await iterator.next();
+      if (first.done) throw new VoiceSynthError('voice provider returned empty audio');
+      return { iterator, first };
+    } catch (error) {
+      await iterator.return().catch(() => {});
+      throw error;
+    }
+  }, input.signal);
+  try {
+    yield started.first.value;
+    for (;;) {
+      const next = await started.iterator.next();
+      if (next.done) break;
+      yield next.value;
+    }
+  } finally {
+    await started.iterator.return().catch(() => {});
+  }
+}

@@ -100,18 +100,20 @@ const guard = setTimeout(() => {
     report.hasButton = await js("!!document.querySelector('.pet-chat-live-button')");
     assert.equal(report.hasButton, true);
     report.stylePicker = await js(
-      "({value:document.querySelector('.pet-chat-live-style select').value,choices:[...document.querySelectorAll('.pet-chat-live-style option')].map(option=>option.value)})",
+      "({value:document.querySelector('.pet-chat-live-tone select').value,choices:[...document.querySelectorAll('.pet-chat-live-tone option')].map(option=>option.value),modes:[...document.querySelectorAll('.pet-chat-live-mode option')].map(option=>option.value),streaming:MediaSource.isTypeSupported('audio/mpeg')})",
     );
     assert.equal(report.stylePicker.value, 'starbell');
-    assert.equal(report.stylePicker.choices.length, 5);
+    assert.equal(report.stylePicker.choices.length, 4);
     assert.ok(report.stylePicker.choices.includes('dango'));
+    assert.deepEqual(report.stylePicker.modes, ['natural', 'custom']);
+    assert.equal(report.stylePicker.streaming, true);
     await js(`(async()=>{
       window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[]};
       document.addEventListener('pet-custom-voice-play',event=>__live.metrics.push(event.detail));
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
-        const voice=String(url).endsWith('/voice/speak')?JSON.parse(init?.body||'{}').voice:undefined;
+        const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
         const queuedAt=performance.now();const response=await originalFetch(url,init);
-        if(voice){const bytes=await response.clone().arrayBuffer();__live.customRequests.push({voice,queuedAt,readyAt:performance.now(),bytes:bytes.byteLength,type:response.headers.get('content-type'),aborted:init?.signal?.aborted===true});if(response.headers.get('content-type')?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}
+        if(voice){const row={voice,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
         return response;
       };
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
@@ -128,7 +130,7 @@ const guard = setTimeout(() => {
           __recorder.ondataavailable=event=>{if(event.data.size)__live.blobs.push(event.data);};__recorder.start(500);
         });return peer;
       }});
-      const originalPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;return originalPlay.call(this).then(()=>{if(this.srcObject)__live.played++;if(this.dataset.petCustomVoice){__live.customAudios.push(this);__live.customPlayed.push(this.dataset.petCustomVoice);}});};
+      const originalPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;return originalPlay.call(this).then(()=>{if(this.srcObject)__live.played++;if(this.dataset.petCustomVoice){__live.customAudios.push(this);__live.customPlayed.push(this.dataset.petCustomVoice);const row=__live.customRequests.find(row=>row.voice===this.dataset.petCustomVoice&&!row.playingAt&&!row.aborted);if(row)row.playingAt=performance.now();}});};
       const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'保留这条草稿');input.dispatchEvent(new Event('input',{bubbles:true}));
       document.querySelector('.pet-chat-live-button').click();
     })()`);
@@ -201,7 +203,7 @@ const guard = setTimeout(() => {
     report.hostReleased = state.sections.voiceSession.data.active === false;
     assert.equal(report.hostReleased, true);
     await js(
-      "(()=>{const select=document.querySelector('.pet-chat-live-style select');select.value='sugarbud';select.dispatchEvent(new Event('change',{bubbles:true}));})()",
+      "(()=>{const select=document.querySelector('.pet-chat-live-tone select');select.value='sugarbud';select.dispatchEvent(new Event('change',{bubbles:true}));})()",
     );
     await wait(100);
     await js("document.querySelector('.pet-chat-live-button').click()");
@@ -215,10 +217,14 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     assert.equal(await js("__live.customPlayed.includes('bigfish-cute/sugarbud-v1')"), true);
+    for (let i = 0; i < 100; i++) {
+      if (await js("!!__live.voiceSamples['bigfish-cute/sugarbud-v1']")) break;
+      await wait(100);
+    }
     await js("document.querySelector('.pet-chat-live-button').click()");
     await wait(300);
     await js(
-      "(()=>{const select=document.querySelector('.pet-chat-live-style select');select.value='dango';select.dispatchEvent(new Event('change',{bubbles:true}));})()",
+      "(()=>{const select=document.querySelector('.pet-chat-live-tone select');select.value='dango';select.dispatchEvent(new Event('change',{bubbles:true}));})()",
     );
     await wait(100);
     await js("document.querySelector('.pet-chat-live-button').click()");
@@ -232,6 +238,11 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     assert.equal(await js("__live.customPlayed.includes('bigfish-cute/dango-v1')"), true);
+    for (let i = 0; i < 100; i++) {
+      if (await js("['starbell-v1','sugarbud-v1','dango-v1'].every(id=>__live.voiceSamples['bigfish-cute/'+id])"))
+        break;
+      await wait(100);
+    }
     report.custom = await js(
       '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt})',
     );
@@ -251,6 +262,35 @@ const guard = setTimeout(() => {
       "__live.tracks.every(track=>track.readyState==='ended')&&__live.peers.every(peer=>peer.connectionState==='closed')",
     );
     assert.equal(report.cancelled, true);
+    await js(
+      "(()=>{const mode=document.querySelector('.pet-chat-live-mode select');mode.value='natural';mode.dispatchEvent(new Event('change',{bubbles:true}));})()",
+    );
+    await wait(100);
+    assert.equal(await js("!!document.querySelector('.pet-chat-live-tone')"), false);
+    const customCount = await js('__live.customRequests.length');
+    await js("document.querySelector('.pet-chat-live-button').click()");
+    for (let i = 0; i < 250; i++) {
+      if (await js("__live.peers[3]?.connectionState==='connected'")) break;
+      await wait(100);
+    }
+    await js('__speakLiveSample()');
+    for (let i = 0; i < 180; i++) {
+      if (await js("!!document.querySelector('.pet-chat-live-pet')?.textContent")) break;
+      await wait(100);
+    }
+    report.nativeDirect = await js(
+      "__live.peers[3]?.connectionState==='connected' && !!document.querySelector('.pet-chat-live-pet')?.textContent && __live.customRequests.length===" +
+        customCount,
+    );
+    assert.equal(report.nativeDirect, true);
+    await js("document.querySelector('.pet-chat-live-button').click()");
+    await wait(300);
+    await js(
+      "(()=>{const mode=document.querySelector('.pet-chat-live-mode select');mode.value='custom';mode.dispatchEvent(new Event('change',{bubbles:true}));})()",
+    );
+    await wait(100);
+    report.rememberedTone = await js("document.querySelector('.pet-chat-live-tone select')?.value");
+    assert.equal(report.rememberedTone, 'dango');
     assert.equal(report.nativeCalls[0]?.voice, undefined);
     assert.equal(report.nativeCalls[0]?.hasStyle, true);
     assert.equal(report.nativeCalls[1]?.hasStyle, true);

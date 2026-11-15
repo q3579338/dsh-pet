@@ -17,6 +17,8 @@ export interface LiveVoiceView {
   readonly pet: string;
   readonly toggle: () => void;
   readonly styleId: LiveVoiceStyleId;
+  readonly mode: 'natural' | 'custom';
+  readonly chooseMode: (mode: string) => void;
   readonly chooseStyle: (id: string) => void;
   readonly interrupt: () => void;
 }
@@ -153,8 +155,8 @@ export function createLiveVoiceControl(options: {
       current.audio.volume = selection.synthesisVoice ? 0 : playbackVolume;
       current.audio.dataset.petNativeVoice = 'true';
       const connectedMessage = selection.synthesisVoice
-        ? `正在语音聊天，回复由${selection.name}逐句朗读。`
-        : '正在即时语音，可以直接说话，也可以打断回复。';
+        ? `自定义音色：${selection.name}，边生成边朗读，可直接开口打断。`
+        : '低延迟原声：正在直接播放 Codex 语音，可以直接说话。';
       if (selection.synthesisVoice) {
         current.speech = createCustomSpeechOutput({
           voice: selection.synthesisVoice,
@@ -344,7 +346,9 @@ export function createLiveVoiceControl(options: {
 /** 换宠物和卸载时结束通话，输入框草稿独立保留。 */
 export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): LiveVoiceView | undefined {
   const [data, setData] = rt.useState<LiveData>({ ...EMPTY });
-  const [styleId, setStyle] = rt.useState<LiveVoiceStyleId>(DEFAULT_LIVE_VOICE_STYLE);
+  const [customStyle, setStyle] = rt.useState<LiveVoiceStyleId>(DEFAULT_LIVE_VOICE_STYLE);
+  const [mode, setMode] = rt.useState<'natural' | 'custom'>('custom');
+  const styleId = mode === 'natural' ? 'natural' : customStyle;
   const styleRef = rt.useRef(styleId);
   styleRef.current = styleId;
   const control = rt.useRef<ReturnType<typeof createLiveVoiceControl> | undefined>(undefined);
@@ -374,8 +378,12 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
     ? {
         ...data,
         styleId,
+        mode,
+        chooseMode: (next) => {
+          if (!data.active && (next === 'natural' || next === 'custom')) setMode(next);
+        },
         chooseStyle: (id) => {
-          if (!data.active && liveVoiceStyle(id)) setStyle(id as LiveVoiceStyleId);
+          if (!data.active && liveVoiceStyle(id)?.synthesisVoice) setStyle(id as LiveVoiceStyleId);
         },
         toggle: () => control.current?.toggle(),
         interrupt: () => control.current?.interrupt(),

@@ -1,12 +1,13 @@
 /** 连续聊天的实际音色播放器：首个短句尽早合成，最多预取两段，打断立即取消旧轮。 */
 import { ROUTE_SEGMENT } from '../../shared/constants.ts';
+import { canStreamSpeech, playSpeechAudio, type SpeechAudio } from '../../shared/stream-audio.ts';
 
 /** 只有完成真实播放才进入 idle；调用方据此显示准备／朗读状态。 */
 export type CustomSpeechPhase = 'preparing' | 'playing' | 'idle';
 /** 合成与播放分离，队列测试不需要网络、扬声器或真实麦克风。 */
 export interface CustomSpeechSink {
-  synthesize(text: string, signal: AbortSignal): Promise<Blob>;
-  play(audio: Blob, signal: AbortSignal): Promise<void>;
+  synthesize(text: string, signal: AbortSignal): Promise<SpeechAudio>;
+  play(audio: SpeechAudio, signal: AbortSignal, started: () => void): Promise<void>;
 }
 /** 每通只持有一个队列；旧轮的网络和播放不能写入新轮。 */
 export interface CustomSpeechQueue {
@@ -36,7 +37,7 @@ export function createCustomSpeechQueue(options: {
   phase?(phase: CustomSpeechPhase): void;
   failure(): void;
 }): CustomSpeechQueue {
-  type Ready = { ok: true; audio: Blob } | { ok: false };
+  type Ready = { ok: true; audio: SpeechAudio } | { ok: false };
   type Job = { text: string; ready?: Promise<Ready> };
   type Turn = {
     abort: AbortController;
@@ -99,8 +100,9 @@ export function createCustomSpeechQueue(options: {
           fail(turn);
           return;
         }
-        options.phase?.('playing');
-        await options.sink.play(result.audio, turn.abort.signal);
+        await options.sink.play(result.audio, turn.abort.signal, () => {
+          if (valid(turn)) options.phase?.('playing');
+        });
         if (!valid(turn)) return;
         turn.jobs.shift();
         prepare(turn);
@@ -123,7 +125,7 @@ export function createCustomSpeechQueue(options: {
       if (!/[\p{L}\p{N}]/u.test(part)) continue;
       turn.first = false;
       turn.jobs.push({ text: part.trim() });
-      options.phase?.('preparing');
+      if (!turn.playing) options.phase?.('preparing');
     }
     prepare(turn);
     void play(turn);
@@ -193,7 +195,8 @@ export function createCustomSpeechOutput(options: {
     ...options,
     sink: {
       async synthesize(text, signal) {
-        const response = await fetch(ROUTE_SEGMENT + '/voice/speak', {
+        const streaming = canStreamSpeech();
+        const response = await fetch(ROUTE_SEGMENT + (streaming ? '/voice/stream' : '/voice/speak'), {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ voice: options.voice, text }),
@@ -201,40 +204,10 @@ export function createCustomSpeechOutput(options: {
         });
         if (!response.ok || !(response.headers.get('content-type') ?? '').includes('audio'))
           throw new Error('Selected voice unavailable');
-        return response.blob();
+        return streaming ? response : response.blob();
       },
-      play(blob, signal) {
-        if (signal.aborted) return Promise.reject(new Error('Speech cancelled'));
-        return new Promise<void>((resolve, reject) => {
-          const url = URL.createObjectURL(blob);
-          const audio = document.createElement('audio');
-          audio.dataset.petCustomVoice = options.voice;
-          audio.hidden = true;
-          audio.volume = options.volume;
-          audio.src = url;
-          document.body.append(audio);
-          let done = false;
-          const settle = (ok: boolean): void => {
-            if (done) return;
-            done = true;
-            clearTimeout(timer);
-            signal.removeEventListener('abort', abort);
-            audio.onended = null;
-            audio.onerror = null;
-            audio.pause();
-            audio.removeAttribute('src');
-            audio.remove();
-            URL.revokeObjectURL(url);
-            if (ok) resolve();
-            else reject(new Error('Speech playback cancelled'));
-          };
-          const abort = (): void => settle(false);
-          const timer = setTimeout(abort, 60000);
-          signal.addEventListener('abort', abort, { once: true });
-          audio.onended = () => settle(true);
-          audio.onerror = abort;
-          void audio.play().catch(abort);
-        });
+      play(audio, signal, started) {
+        return playSpeechAudio(audio, { signal, volume: options.volume, voice: options.voice, started });
       },
     },
   });

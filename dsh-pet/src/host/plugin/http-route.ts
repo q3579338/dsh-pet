@@ -7,7 +7,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { ROUTE_SEGMENT } from '../../shared/constants.ts';
-import { readBody, sendFile, sendJson, sendText, type RouteResult } from '../http.ts';
+import { readBody, sendFile, sendJson, sendText, sendStream, type RouteResult } from '../http.ts';
 import { failureBody } from '../routes/result.ts';
 import { createPetRouter } from '../routes/index.ts';
 import type { PetRouteDeps } from '../routes/types.ts';
@@ -86,16 +86,16 @@ export function registerHttpRoute(ctx: HostContext, handlePetRoute: HttpRouteHan
             const readsBody = req.method === 'PUT' || req.method === 'POST' || req.method === 'PATCH';
             const body = readsBody ? await readBody(req) : undefined;
             const result = await handlePetRoute(req.url ?? '/', req.method ?? 'GET', body, abort.signal);
-            res.off('close', onClose);
             if (result.kind === 'json') sendJson(res, result.status, result.obj, result.headers);
             else if (result.kind === 'text') sendText(res, result.status, result.body);
             else if (result.kind === 'none') {
               /* 调用方已断开：不再写（写了会抛） */
-            } else sendFile(req, res, result.file, result.contentType); // 非 async：流在 open 后自己 pipe，错误内部收口
+            } else if (result.kind === 'stream') await sendStream(res, result);
+            else sendFile(req, res, result.file, result.contentType); // 非 async：流在 open 后自己 pipe，错误内部收口
           } catch (e) {
-            res.off('close', onClose);
             // 连接已断（挂起等待被中止后也可能撞上）→ 不再写，避免二次抛错
-            if (!res.destroyed && !res.writableEnded) {
+            if (res.headersSent) res.destroy();
+            else if (!res.destroyed && !res.writableEnded) {
               // 请求体超限与客户端中断是用户侧问题，不能报成 500；断连时连响应都写不出去。
               const code = (e as { code?: string }).code;
               if (code === 'body-too-large')
@@ -106,6 +106,8 @@ export function registerHttpRoute(ctx: HostContext, handlePetRoute: HttpRouteHan
                 sendJson(res, 500, failureBody('internal-error', 'dsh-pet: internal error'));
               }
             }
+          } finally {
+            res.off('close', onClose);
           }
         },
       }),

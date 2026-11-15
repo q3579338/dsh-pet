@@ -10,6 +10,7 @@ import { rename, rm, stat, writeFile } from 'node:fs/promises';
 import { FORMAT_INFO, cacheKey, cachePath, ensureCacheDir, pruneCache } from './cache.ts';
 import { listCatalog, resolveVoice } from './registry.ts';
 import { DEFAULT_PROVIDER_TIMEOUT_MS, type ResolvedVoice, type VoiceCatalog, type VoiceFormat } from './types.ts';
+import { SpeechStreamHub } from './stream-hub.ts';
 
 /** 单次请求允许的最大文本长度（字符，按 UTF-16 计）。 */
 export const MAX_TEXT_CHARS = 500;
@@ -39,10 +40,15 @@ export type SpeakFailure = 'bad-request' | 'voice-busy' | 'generate-error';
 export type SpeakResult =
   { ok: true; file: string; contentType: string } | { ok: false; reason: SpeakFailure; message: string };
 
+/** 流式订阅与完整请求共享合成、缓存及取消所有权。 */
+export type SpeechStreamResult =
+  SpeakResult | { ok: true; contentType: string; stream: AsyncIterable<Uint8Array>; dispose(): void };
+
 /** 语音服务：路由层只依赖这两个方法。 */
 export interface VoiceService {
   /** 合成一段文本；同一输入命中缓存时不再调用实现。 */
   speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult>;
+  stream?(raw: unknown, signal?: AbortSignal): Promise<SpeechStreamResult>;
   /** 当前音色目录（由注册表提供）。 */
   list(): VoiceCatalog;
 }
@@ -168,7 +174,13 @@ export function createVoiceService(options: {
   staleWaitMs?: number;
 }): VoiceService {
   const { userRoot, log, configuredVoice } = options;
-  type Job = { promise: Promise<SpeakResult>; abort: AbortController; users: number; settled: boolean };
+  type Job = {
+    promise: Promise<SpeakResult>;
+    abort: AbortController;
+    users: number;
+    settled: boolean;
+    hub: SpeechStreamHub;
+  };
   const inFlight = new Map<string, Job>();
   const cancelled = (): SpeakResult => ({ ok: false, reason: 'generate-error', message: 'voice synthesis cancelled' });
   const joinJob = (job: Job, signal?: AbortSignal): Promise<SpeakResult> =>
@@ -245,7 +257,11 @@ export function createVoiceService(options: {
   }
 
   /** 排队、合成、原子落盘；失败已归一成结论，不向外抛。 */
-  async function runSynthesis(call: Extract<PreparedCall, { ok: true }>, signal: AbortSignal): Promise<SpeakResult> {
+  async function runSynthesis(
+    call: Extract<PreparedCall, { ok: true }>,
+    signal: AbortSignal,
+    hub: SpeechStreamHub,
+  ): Promise<SpeakResult> {
     const { text, rate, resolved, target } = call;
     const { provider, voice } = resolved;
     const queue = { dropped: false };
@@ -261,16 +277,32 @@ export function createVoiceService(options: {
         const dir = await ensureCacheDir(userRoot);
         const timeoutMs = provider.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
         // signal 让实现能提前收手；withTimeout 兜住「它根本不理这个 signal」的情况
-        const bytes = await withTimeout(
-          provider.synthesize({
-            text,
-            voice: voice.id,
-            rate,
-            signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
-          }),
-          timeoutMs,
-          signal,
-        );
+        const input = {
+          text,
+          voice: voice.id,
+          rate,
+          signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+        };
+        const synthesize = async (): Promise<Uint8Array> => {
+          if (provider.stream) {
+            let first = true;
+            for await (const chunk of provider.stream(input)) {
+              if (signal.aborted) throw new Error('voice synthesis cancelled');
+              hub.push(chunk);
+              if (first && chunk.length) {
+                first = false;
+                log?.info?.(
+                  `[dsh-pet] voice stream: first-byte chars=${text.length} voice=${resolved.limitedId} ms=${Date.now() - startedMs}`,
+                );
+              }
+            }
+            return hub.bytes();
+          }
+          const bytes = await provider.synthesize(input);
+          if (!signal.aborted) hub.push(bytes);
+          return bytes;
+        };
+        const bytes = await withTimeout(synthesize(), timeoutMs, signal);
         if (signal.aborted) return;
         // 空字节按失败处理：0 字节文件会被缓存命中逻辑反复重合成，白烧上游
         if (bytes.length === 0) throw new Error('voice provider returned empty audio');
@@ -302,36 +334,83 @@ export function createVoiceService(options: {
     return { ok: true, file: target, contentType: call.contentType };
   }
 
-  async function speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult> {
-    if (signal?.aborted) return cancelled();
+  async function jobFor(
+    raw: unknown,
+    signal?: AbortSignal,
+  ): Promise<{ result: SpeakResult } | { job: Job; contentType: string }> {
+    if (signal?.aborted) return { result: cancelled() };
     const call = prepareCall(raw);
-    if (!call.ok) return call.result;
+    if (!call.ok) return { result: call.result };
 
     const cached = await findCached(call.target);
-    if (signal?.aborted) return cancelled();
+    if (signal?.aborted) return { result: cancelled() };
     if (cached) {
       log?.info?.(`[dsh-pet] voice speak: cache=hit chars=${call.text.length} voice=${call.resolved.limitedId}`);
-      return { ok: true, file: cached, contentType: call.contentType };
+      return { result: { ok: true, file: cached, contentType: call.contentType } };
     }
     const existing = inFlight.get(call.target);
-    if (existing && !existing.abort.signal.aborted) return joinJob(existing, signal);
+    if (existing && !existing.abort.signal.aborted) return { job: existing, contentType: call.contentType };
     if (queueUsed >= MAX_QUEUE) {
       log?.warn?.(
         `[dsh-pet] voice speak: queue full (max ${MAX_QUEUE}) chars=${call.text.length} ` +
           `voice=${call.resolved.limitedId}`,
       );
-      return { ok: false, reason: 'voice-busy', message: 'voice queue is full, retry later' };
+      return { result: { ok: false, reason: 'voice-busy', message: 'voice queue is full, retry later' } };
     }
     const abort = new AbortController();
-    const job: Job = { abort, users: 0, settled: false, promise: Promise.resolve(cancelled()) };
-    job.promise = runSynthesis(call, abort.signal).then((result) => {
+    const job: Job = {
+      abort,
+      users: 0,
+      settled: false,
+      promise: Promise.resolve(cancelled()),
+      hub: new SpeechStreamHub(),
+    };
+    job.promise = runSynthesis(call, abort.signal, job.hub).then((result) => {
       job.settled = true;
+      job.hub.end(result.ok);
       if (inFlight.get(call.target) === job) inFlight.delete(call.target);
       return result;
     });
     inFlight.set(call.target, job);
-    return joinJob(job, signal);
+    return { job, contentType: call.contentType };
   }
 
-  return { list: listCatalog, speak };
+  async function speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult> {
+    const selected = await jobFor(raw, signal);
+    return 'result' in selected ? selected.result : joinJob(selected.job, signal);
+  }
+  async function stream(raw: unknown, signal?: AbortSignal): Promise<SpeechStreamResult> {
+    const selected = await jobFor(raw, signal);
+    if ('result' in selected) return selected.result;
+    const { job } = selected;
+    job.users++;
+    let released = false;
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      signal?.removeEventListener('abort', release);
+      job.users--;
+      if (!job.users && !job.settled) job.abort.abort();
+    };
+    signal?.addEventListener('abort', release, { once: true });
+    try {
+      await job.hub.first(signal);
+      return {
+        ok: true,
+        contentType: selected.contentType,
+        dispose: release,
+        stream: (async function* () {
+          try {
+            yield* job.hub.read(signal);
+          } finally {
+            release();
+          }
+        })(),
+      };
+    } catch {
+      release();
+      return signal?.aborted ? cancelled() : job.promise;
+    }
+  }
+  return { list: listCatalog, speak, stream };
 }

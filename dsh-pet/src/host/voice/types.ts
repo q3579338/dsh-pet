@@ -50,6 +50,8 @@ export interface VoiceProvider {
    * @returns 音频字节；格式由 {@link VoiceProvider.format} 声明。
    */
   synthesize(input: SynthInput): Promise<Uint8Array>;
+  /** 可选的真实音频字节流；参数与完整合成相同。 */
+  stream?(input: SynthInput): AsyncIterable<Uint8Array>;
 }
 
 /** 限定 id 命中注册表后的结果；`limitedId` 原样带回，供缓存键与日志使用。 */

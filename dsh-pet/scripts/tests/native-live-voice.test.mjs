@@ -78,6 +78,8 @@ test(
       assert.equal(report.discardClosed, true);
       assert.ok(report.live.peak > 0.001);
       assert.equal(report.bargeInStoppedOld, true);
+      assert.equal(report.nativeDirect, true);
+      assert.equal(report.rememberedTone, 'dango');
       for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
         assert.ok(report.custom.played.includes('bigfish-cute/' + id));
     } finally {

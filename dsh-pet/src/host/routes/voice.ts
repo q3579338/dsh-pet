@@ -44,7 +44,7 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
     return okResult({ ok: true, ...deps.voice.list() });
   }
 
-  if (rest === 'voice/speak') {
+  if (rest === 'voice/speak' || rest === 'voice/stream') {
     if (method !== 'POST') return methodNotAllowed();
     let parsed: unknown;
     try {
@@ -52,8 +52,13 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
     } catch {
       return invalidJson();
     }
-    const result = await deps.voice.speak(parsed, signal);
+    const result =
+      rest === 'voice/stream' && deps.voice.stream
+        ? await deps.voice.stream(parsed, signal)
+        : await deps.voice.speak(parsed, signal);
     if (!result.ok) return failResult(result.reason, result.message);
+    if ('stream' in result)
+      return { kind: 'stream', stream: result.stream, contentType: result.contentType, dispose: result.dispose };
     return { kind: 'file', file: result.file, contentType: result.contentType };
   }
 

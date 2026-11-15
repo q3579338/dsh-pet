@@ -2683,6 +2683,27 @@ paths:
         "405":
           description: 方法不是 POST。
 
+  /dsh-pet-7340/voice/stream:
+    post:
+      tags: [Voice]
+      operationId: streamVoice
+      summary: 流式合成所选音色
+      description: |
+        与 `/voice/speak` 使用相同参数、排队、实际音色、在途任务与原子缓存。
+        支持流式的实现收到首批真实音频后即返回音频流；不等待整段合成完成。
+        首字节之前的失败仍返回结构化 JSON；发送音频后的失败直接中断连接，
+        不重发已播出的片段。调用方取消或断连释放订阅，最后一个订阅离开会中止上游。
+        已命中缓存或实现不支持流式时返回同一音色的完整音频，禁止替换音色。
+      requestBody:
+        $ref: "#/paths/~1dsh-pet-7340~1voice~1speak/post/requestBody"
+      responses:
+        "200":
+          $ref: "#/paths/~1dsh-pet-7340~1voice~1speak/post/responses/200"
+        "400":
+          description: 请求体不是合法 JSON。
+        "405":
+          description: 方法不是 POST。
+
   /dsh-pet-7340/voice/voices:
     get:
       tags: [Voice]
