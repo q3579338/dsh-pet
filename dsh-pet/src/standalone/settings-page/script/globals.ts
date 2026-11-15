@@ -84,7 +84,6 @@ function voiceCard() {
   const voices = state.voiceOptions && state.voiceOptions.length > 0
     ? state.voiceOptions
     : VOICES.map((voice) => ({ id: voice.id, name: voice.name, tag: voice.tag, provider: voice.provider }));
-  const speechProviders = state.speechProviders || [];
   return card('语音', '四类语音各一个开关，互不从属；音色、识别实现与音量共用。', [
     toggleRow('g-voice', '手动播报', '右键菜单与斜杠命令触发的碎碎念、对话回复念出来。', g.voiceEnabled, (value) => setGlobal('voiceEnabled', value)),
     selectField('g-voice-name', '音色', g.voiceName, voices.map((voice) => ({ value: voice.id, label: voice.name + (voice.tag ? ' · ' + voice.tag : ''), group: voice.provider })), (value) => { stopVoicePreview(); setGlobal('voiceName', value); }, 'Edge 原版音色与原创调音需联网合成；可先试听，保存后用于回复。'),
@@ -93,8 +92,16 @@ function voiceCard() {
     toggleRow('g-voice-whisper', '周期碎碎念也念出来', '定时生成的那句碎碎念念出来。', g.voiceWhisperEnabled, (value) => setGlobal('voiceWhisperEnabled', value)),
     toggleRow('g-voice-todo', '待办提醒也念出来', '到点的待办提醒念出来。', g.voiceTodoEnabled, (value) => setGlobal('voiceTodoEnabled', value)),
     toggleRow('g-voice-notify', '工作状态播报', '状态变化时念一句角色台词。进行中提示会限频，聊天朗读优先；桌面端在后台也可播报。', g.voiceNotifyEnabled, (value) => setGlobal('voiceNotifyEnabled', value)),
-    selectField('g-speech-provider', '语音识别', g.speechProvider, speechProviders.map((item) => ({ value: item.id, label: item.name })), (value) => setGlobal('speechProvider', value), 'Codex 听写沿用已有登录，将按住录制的音频上传到 Codex/OpenAI 识别；松开后先填入草稿，确认再发送。Windows 本机识别可选用，录音留在本机。'),
+    make('div', { class: 'field' }, [make('span', { class: 'fieldLabel', text: '语音识别' }), make('p', { id: 'speech-source-info', class: 'fieldHint', text: speechSourceDescription() })]),
   ]);
+}
+
+function speechSourceDescription() {
+  const source = protocolSelect && protocolSelect.getValue();
+  return source === 'workbuddy' ? '跟随顶部来源：WorkBuddy 语音识别。切换来源需保存；不调用 Codex。' : source === 'codex' ? '跟随顶部来源：Codex/OpenAI 语音识别。切换来源需保存；不调用 WorkBuddy。' : '当前来源未接入语音识别，不会借用 Codex 或 WorkBuddy。';
+}
+function updateSpeechSource() {
+  const node = byId('speech-source-info'); if (node) node.textContent = speechSourceDescription();
 }
 
 function fontCard() {

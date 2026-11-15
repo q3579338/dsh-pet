@@ -316,7 +316,7 @@ export function composerNode(
                     disabled: live.active,
                     onChange: (event: { target: { value: string } }) => live.chooseMode(event.target.value),
                     children: [
-                      h('option', { value: 'natural', children: 'Codex 原声' }),
+                      h('option', { value: 'natural', disabled: live.source !== 'codex', children: 'Codex 原声' }),
                       h('option', { value: 'custom', children: '自定义音色' }),
                     ],
                   }),
@@ -394,7 +394,9 @@ export function composerNode(
                 ? h('div', {
                     className: 'pet-chat-live-note',
                     children: liveVoiceStyle(live.styleId)?.synthesisVoice
-                      ? 'Codex/OpenAI 识别语音；回答跟随模型连接（WorkBuddy 或 Codex），所选音色逐句朗读。字幕先出现，本次对话不写入普通聊天记忆。'
+                      ? (live.source === 'workbuddy'
+                          ? 'WorkBuddy 自己识别语音并回答；'
+                          : 'Codex/OpenAI 识别语音并回答；') + '所选音色独立朗读，字幕先出现，本通不写入普通聊天记忆。'
                       : '麦克风正在使用，语音发送至 Codex/OpenAI。本次直接播放 Codex 原声，字幕不写入普通聊天记忆。',
                   })
                 : null,

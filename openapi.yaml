@@ -2456,12 +2456,13 @@ paths:
                 properties:
                   workbuddy: { type: boolean }
                   model: { type: string }
+                  source: { type: string, description: 当前已保存的连接来源 }
 
   /dsh-pet-7340/voice/conversation/start:
     post:
       tags: [Voice]
       operationId: startVoiceConversation
-      summary: 沿用 Codex 流式听写和 WorkBuddy 内置模型开始连续聊天
+      summary: 使用 WorkBuddy 自己的流式识别和内置模型开始连续聊天
       description: 仅独立版提供。角色与模型从本机已保存设置读取，不接受请求指定地址或凭据。只允许一通；录音和本通上下文不写普通聊天记忆。
       requestBody:
         required: true
@@ -2652,6 +2653,9 @@ paths:
       summary: 把一段录音识别成文字
       description: |
         与 `/voice/speak` 反向：音频进、文字出。
+
+        Codex独立版从`.17`起按已保存的连接来源隔离识别，Codex用Codex、WorkBuddy用WorkBuddy；
+        显式请求另一家返回unsupported，目录仅列当前来源，识别期间切换来源会丢弃旧结果。
 
         - **多实现并存**：宿主插件可经 Cordis 服务 `petApi7340.speech.register` 注册自己的识别实现；
           `/voice/hear-providers` 列出全部可用实现。

@@ -9,9 +9,21 @@ const { app } = electron,
   RealWindow = electron.BrowserWindow;
 const run = process.env.FISH_TEST_RUN;
 const report = { offscreen: true, shown: false, nativeCalls: 0 };
+report.codexDictationCalls = 0;
+report.codexChildren = 0;
+report.workbuddyAsrChildren = 0;
+const childProcess = require('node:child_process');
+const nativeSpawn = childProcess.spawn;
+childProcess.spawn = function (file, args, options) {
+  if (/(?:^|[\\/])codex\.exe$/i.test(String(file))) report.codexChildren++;
+  if (args?.includes('--asr')) report.workbuddyAsrChildren++;
+  return nativeSpawn.call(this, file, args, options);
+};
+Module.syncBuiltinESMExports();
 const originalFetch = globalThis.fetch;
 globalThis.fetch = (url, init) => {
   if (String(url).includes('/wham/realtime/calls')) report.nativeCalls++;
+  if (String(url).includes('chatgpt.com/backend-api/transcribe')) report.codexDictationCalls++;
   return originalFetch(url, init);
 };
 const HiddenWindow = new Proxy(RealWindow, {
@@ -73,6 +85,32 @@ const guard = setTimeout(() => {
     });
     assert.equal(sample.status, 200);
     const b64 = Buffer.from(await sample.arrayBuffer()).toString('base64');
+    const wrongSource = await (
+      await fetch(origin + '/dsh-pet-7340/voice/hear', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ audio: b64, provider: 'codex' }),
+      })
+    ).json();
+    assert.equal(wrongSource.ok, false);
+    const recognized = await (
+      await fetch(origin + '/dsh-pet-7340/voice/hear', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ audio: b64, provider: 'workbuddy' }),
+      })
+    ).json();
+    assert.equal(recognized.ok, true);
+    assert.match(recognized.text, /测试/);
+    report.workbuddyUploadedRecognition = recognized.text;
+    const wrongCall = await (
+      await fetch(origin + '/dsh-pet-7340/voice/live/start', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ petId: 'main', sdp: 'v=0\ntest', styleId: 'natural' }),
+      })
+    ).json();
+    assert.equal(wrongCall.ok, false);
     app.emit('codex-bigfish:chat');
     let chat;
     for (let i = 0; i < 100; i++) {
@@ -166,6 +204,9 @@ const guard = setTimeout(() => {
       `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled})`,
     );
     assert.equal(report.nativeCalls, 0);
+    assert.equal(report.codexDictationCalls, 0);
+    assert.equal(report.codexChildren, 0);
+    assert.ok(report.workbuddyAsrChildren >= 6);
     assert.equal(report.live.peers, 0);
     assert.ok(report.live.models.length >= 5 && report.live.models.every((model) => model === 'deepseek-v4-flash'));
     assert.ok(report.live.recognized.length >= 6 && report.live.recognized.every((row) => /测试/.test(row.text)));
@@ -195,6 +236,42 @@ const guard = setTimeout(() => {
     const memory = path.join(run, 'home/dsh-pet/memory.json');
     report.memoryUntouched = !fs.existsSync(memory) || fs.readFileSync(memory, 'utf8').trim() === '{}';
     assert.equal(report.memoryUntouched, true);
+    // 设置顶部来源选择及真实订阅查询：查询 Codex 草稿时，已保存来源仍保持 WorkBuddy。
+    await js("document.querySelector('[data-tab=config]').click()");
+    for (let i = 0; i < 100; i++) {
+      if (await js("!!document.querySelector('#protocol-host button')")) break;
+      await wait(100);
+    }
+    const choose = async (label) => {
+      await js("document.querySelector('#protocol-host button').click()");
+      await js(
+        `[...document.querySelectorAll('[role=option]')].find(option=>option.textContent.includes(${JSON.stringify(label)})).click()`,
+      );
+      await wait(80);
+    };
+    await choose('本机 Codex');
+    await js("document.querySelector('#balance-btn').click()");
+    await until("document.querySelector('#balance-result').dataset.ok==='true'", 'Codex subscription query');
+    report.codexBalanceShown = await js("document.querySelector('#balance-result').textContent.includes('Codex')");
+    assert.equal(report.codexBalanceShown, true);
+    assert.equal((await (await fetch(origin + '/standalone-ai/settings', { headers })).json()).protocol, 'workbuddy');
+    await choose('国内版 WorkBuddy');
+    await js("document.querySelector('#balance-btn').click()");
+    await until("document.querySelector('#balance-result').dataset.ok==='true'", 'WorkBuddy subscription query');
+    report.workbuddyBalanceShown = await js(
+      "document.querySelector('#balance-result').textContent.includes('WorkBuddy')&&document.querySelector('#balance-result').textContent.includes('积分')",
+    );
+    assert.equal(report.workbuddyBalanceShown, true);
+    report.sourceAtTop = await js(
+      "document.querySelector('#panel-config .scroll').firstElementChild.id==='settings'&&document.querySelector('#settings .card').id==='connection-source-card'",
+    );
+    assert.equal(report.sourceAtTop, true);
+    await js("document.querySelector('#save').click()");
+    await until("!document.querySelector('#dirty')||document.querySelector('#dirty').hidden", 'save source');
+    chat.setSize(390, 844);
+    await js("document.querySelector('#panel-config .scroll').scrollTop=0");
+    await wait(100);
+    fs.writeFileSync(path.join(run, 'source-settings-offscreen.png'), (await chat.webContents.capturePage()).toPNG());
     chat.setSize(390, 844);
     await wait(100);
     fs.writeFileSync(path.join(run, 'workbuddy-live-offscreen.png'), (await chat.webContents.capturePage()).toPNG());

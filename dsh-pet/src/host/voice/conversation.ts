@@ -1,4 +1,4 @@
-/** 连续语音：流式 Codex 听写 → 当前 WorkBuddy 模型 → 浏览器所选真实音色。 */
+/** 连续语音：WorkBuddy 自己流式识别 → 当前内置模型 → 浏览器所选真实音色。 */
 import { randomUUID } from 'node:crypto';
 import { createStreamingDictation, DictationStreamError, type StreamingDictation } from './codex/dictation-stream.ts';
 import { liveVoiceStyle } from '../../shared/live-voice-style.ts';
@@ -20,7 +20,7 @@ export interface ConversationDependencies {
 }
 /** 本地会话编号只用于当前进程，关闭后不保留音频与聊天记录。 */
 export interface VoiceConversationService {
-  options(): { workbuddy: boolean; model: string };
+  options(): { workbuddy: boolean; model: string; source: string };
   start(
     petId: string,
     styleId: string,
@@ -62,7 +62,11 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   let disposed = false;
   const options = () => {
     const selection = deps.selection();
-    return { workbuddy: selection?.protocol === 'workbuddy', model: selection?.model ?? '' };
+    return {
+      workbuddy: selection?.protocol === 'workbuddy',
+      model: selection?.model ?? '',
+      source: selection?.protocol ?? '',
+    };
   };
   const release = (room: Room): void => {
     if (room.abort.signal.aborted) return;
@@ -90,24 +94,32 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   };
   const requireRoom = (id: string): Room => {
     if (!active || active.id !== id || active.abort.signal.aborted) throw new Error('语音会话已结束，请重新开始。');
+    const selection = deps.selection();
+    if (selection?.protocol !== 'workbuddy' || selection.model !== active.model) {
+      release(active);
+      throw new Error('连接来源已切换，请重新开始语音。');
+    }
     active.touch = Date.now();
     return active;
   };
   const warm = (room: Room): Promise<StreamingDictation> => {
     if (room.warm) return room.warm;
     let prepared: StreamingDictation | undefined;
-    const promise = (deps.dictation ?? createStreamingDictation)((text) => {
-      if (room.input?.asr === prepared) emit(room, { type: 'partial', text });
-    }, room.abort.signal).then((asr) => {
-      if (room.abort.signal.aborted) {
-        asr.dispose();
-        throw new Error('stopped');
-      }
-      prepared = asr;
-      room.warmAt = Date.now();
-      room.asrs.add(asr);
-      return asr;
-    });
+    if (!deps.dictation) throw new WorkBuddyFailure('WorkBuddy 流式识别组件暂不可用。');
+    const promise = deps
+      .dictation((text) => {
+        if (room.input?.asr === prepared) emit(room, { type: 'partial', text });
+      }, room.abort.signal)
+      .then((asr) => {
+        if (room.abort.signal.aborted) {
+          asr.dispose();
+          throw new Error('stopped');
+        }
+        prepared = asr;
+        room.warmAt = Date.now();
+        room.asrs.add(asr);
+        return asr;
+      });
     room.warm = promise;
     void promise.catch(() => {
       if (room.warm === promise) room.warm = undefined;

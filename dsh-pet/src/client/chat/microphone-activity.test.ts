@@ -11,9 +11,12 @@ test('持续开口才触发，噪声和单帧点击不触发；静音后可再�
   feed(0.1, 22);
   for (let i = 0; i < 12; i++) feed(0, 22);
   assert.equal(calls, 0);
+  for (let i = 0; i < 3; i++) feed(0.025, 22);
+  for (let i = 0; i < 12; i++) feed(0, 22);
+  assert.equal(calls, 0, '短于持续开口的噪声不能截断正在朗读的音频');
   for (let i = 0; i < 8; i++) feed(0.025, 22);
   assert.equal(calls, 1);
   for (let i = 0; i < 12; i++) feed(0, 22);
-  for (let i = 0; i < 4; i++) feed(0.025, 22);
+  for (let i = 0; i < 8; i++) feed(0.025, 22);
   assert.equal(calls, 2);
 });

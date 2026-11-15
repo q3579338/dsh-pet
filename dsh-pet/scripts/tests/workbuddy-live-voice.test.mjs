@@ -79,6 +79,11 @@ test(
       assert.equal(report.bargeInStoppedOld, true);
       assert.equal(report.cancelled, true);
       assert.equal(report.memoryUntouched, true);
+      assert.equal(report.workbuddyBalanceShown, true);
+      assert.equal(report.codexBalanceShown, true);
+      assert.equal(report.sourceAtTop, true);
+      assert.equal(report.codexDictationCalls, 0);
+      assert.ok(report.workbuddyAsrChildren >= 6);
       for (const voice of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
         assert.ok(report.live.metrics.some((row) => row.voice === 'bigfish-cute/' + voice && row.realSpeechEndMs > 0));
     } finally {
@@ -90,6 +95,7 @@ test(
         for (const file of [
           'result.json',
           'workbuddy-live-offscreen.png',
+          'source-settings-offscreen.png',
           'starbell-v1.mp3',
           'sugarbud-v1.mp3',
           'dango-v1.mp3',

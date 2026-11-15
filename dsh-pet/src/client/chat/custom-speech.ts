@@ -23,11 +23,13 @@ export interface CustomSpeechQueue {
 /** 分句保持 Unicode 字符完整；首句采用较短边界，后续段扩大以减少在线合成次数。 */
 function boundary(text: string, first: boolean, final: boolean): number {
   let end = 0;
-  const limit = first ? 18 : 96;
+  const limit = first ? 48 : 96;
   for (const char of text) {
     if (end + char.length > limit) return end;
     end += char.length;
-    if (end >= (first ? 2 : 24) && /[。！？!?；;\n]|[，,、]/u.test(char)) return end;
+    const sentence = /[。！？!?；;\n]/u.test(char);
+    if (sentence && end >= (first ? 8 : 24)) return end;
+    if (/[，,、]/u.test(char) && end >= (first ? 12 : 24)) return end;
   }
   return final ? end : 0;
 }
@@ -161,8 +163,8 @@ export function createCustomSpeechQueue(options: {
         turn.timer = undefined;
       }
       flush(turn);
-      // 首批只有一两个字时保留原截止时间；凑够可朗读正文就立即交付，不再多等一轮。
-      if (turn.first && turn.firstDue && turn.buffer.length >= 4) flush(turn, true);
+      // 保留首个截止时间，但不把两三个字的问候切成一段；长句凑够连贯正文才提前交付。
+      if (turn.first && turn.firstDue && turn.buffer.length >= 16) flush(turn, true);
       if (wasFirst && !turn.first) {
         clearTimeout(turn.timer);
         turn.timer = undefined;
@@ -172,9 +174,9 @@ export function createCustomSpeechQueue(options: {
           () => {
             turn.timer = undefined;
             if (turn.first) turn.firstDue = true;
-            if (valid(turn) && turn.buffer.length >= (turn.first ? 4 : 40)) flush(turn, true);
+            if (valid(turn) && turn.buffer.length >= (turn.first ? 16 : 40)) flush(turn, true);
           },
-          turn.first ? 160 : 650,
+          turn.first ? 400 : 650,
         );
     },
     finish(fullText) {

@@ -1,13 +1,14 @@
 /** 国内版 WorkBuddy 内置模型；加密登录及实际请求只在其本机运行组件内处理。 */
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { AiRequest, AiTransportEvent } from '../ai-transport.ts';
 import type { DiscoveredModel } from '../ai-provider/types.ts';
 import { resolveWorkBuddyCommand, WorkBuddyFailure, type WorkBuddyCommand } from './executable.ts';
 import { runWorkBuddy } from './process.ts';
 import { validWorkBuddyModel, workBuddyEvents } from './events.ts';
 import { createWorkBuddySession } from './session.ts';
+import { nativeWorker } from './worker-path.ts';
+import type { WorkBuddyQuota } from './events.ts';
 /** 模型标识由服务端返回，测试连接可核对实际返回的型号。 */
 export type WorkBuddyEvent = AiTransportEvent & { modelUsed?: string };
 /** 只在明确选择 WorkBuddy 时创建进程，退出时释放自己创建的全部请求。 */
@@ -16,19 +17,11 @@ export interface WorkBuddyConnection {
   stream(model: string, request: AiRequest, signal: AbortSignal, maxTokens?: number): AsyncIterable<WorkBuddyEvent>;
   test(model: string): Promise<{ reply: string; modelUsed?: string }>;
   prepareVoice?(active: boolean): Promise<void>;
+  balance?(): Promise<WorkBuddyQuota>;
+  hear?(audio: Uint8Array, signal: AbortSignal): Promise<string>;
   dispose(): void;
 }
 /** 源码和已打包入口各保留一个固定候选，不接受网页传入脚本路径。 */
-function nativeWorker(): string {
-  const folder = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    resolve(folder, '../runtime/workbuddy-native.cjs'),
-    resolve(folder, '../../../runtime/workbuddy-native.cjs'),
-  ];
-  const worker = candidates.find((file) => existsSync(file));
-  if (!worker) throw new WorkBuddyFailure('WorkBuddy 接入组件缺失，请重新解压完整程序。');
-  return worker;
-}
 /** 测试可替换执行器，生产只运行本机国内版。 */
 export function createWorkBuddyConnection(
   home: string,
@@ -38,7 +31,7 @@ export function createWorkBuddyConnection(
     active = new Set<AbortController>();
   let disposed = false;
   let session: ReturnType<typeof createWorkBuddySession> | undefined;
-  const run = async function* (input: unknown, signal?: AbortSignal) {
+  const run = async function* (input: unknown, signal?: AbortSignal, persistent = true) {
     if (disposed) throw new WorkBuddyFailure('WorkBuddy 连接已关闭。');
     mkdirSync(cwd, { recursive: true });
     const abort = new AbortController();
@@ -47,7 +40,7 @@ export function createWorkBuddyConnection(
     let pending = '';
     try {
       const combined = signal ? AbortSignal.any([signal, abort.signal]) : abort.signal;
-      if (session) {
+      if (session && persistent) {
         for await (const line of session.run(input, combined)) yield events.accept(line);
         events.finish();
         return;
@@ -70,6 +63,21 @@ export function createWorkBuddyConnection(
     }
   };
   const connection: WorkBuddyConnection = {
+    async balance() {
+      let value: WorkBuddyQuota | undefined;
+      for await (const event of run({ action: 'balance' }, AbortSignal.timeout(20000), false))
+        if (event.balance) value = event.balance;
+      if (!value) throw new WorkBuddyFailure('WorkBuddy 未提供套餐与积分数据，请稍后重试。');
+      return value;
+    },
+    async hear(audio, signal) {
+      if (audio.length > 2200000) throw new WorkBuddyFailure('WorkBuddy 单段录音过长，请分段说话。');
+      let text: string | undefined;
+      for await (const event of run({ action: 'hear', audio: Buffer.from(audio).toString('base64') }, signal, false))
+        if (event.transcript !== undefined) text = event.transcript;
+      if (text === undefined) throw new WorkBuddyFailure('WorkBuddy 没有返回识别结果，请重试。');
+      return text;
+    },
     async prepareVoice(active) {
       if (!active) {
         session?.dispose();

@@ -12,6 +12,7 @@ import type { LiveControlOptions } from './live-voice-types.ts';
 
 /** 对话区只显示本次最近一轮字幕，不写入普通聊天存档。 */
 export interface LiveVoiceView {
+  readonly source?: string;
   readonly active: boolean;
   readonly phase: 'idle' | 'connecting' | 'live';
   readonly message: string;
@@ -244,7 +245,8 @@ function createCodexLiveVoiceControl(options: {
             if (full) paint({ pet: full });
             current.speech?.finish(full);
           }
-          if (value.type === 'input_audio_buffer.speech_started') current.speech?.interrupt();
+          // 自动打断由本机持续开口检测决定，服务端单帧噪声事件不直接截断朗读。
+          if (value.type === 'input_audio_buffer.speech_started') current.speech?.prime?.();
           if (value.type === 'error') stop('Codex 即时语音已中断，请重试。');
         } catch {
           /* 忽略无法识别的控制事件，不显示内部报错或音频载荷。 */
@@ -379,10 +381,19 @@ export function createLiveVoiceControl(options: LiveControlOptions): {
       options.changed({ ...EMPTY, active: true, phase: 'connecting', message: '正在检查当前语音连接…' });
       void (async () => {
         const natural = options.style?.() === 'natural';
-        const value = natural
-          ? {}
-          : await fetch(ROUTE_SEGMENT + '/voice/conversation/options', { signal: abort.signal }).then((r) => r.json());
+        const value = await fetch(ROUTE_SEGMENT + '/voice/conversation/options', { signal: abort.signal }).then((r) =>
+          r.json(),
+        );
         if (disposed || abort.signal.aborted) return;
+        if (value.workbuddy === true && natural) {
+          selecting = undefined;
+          options.changed({
+            ...EMPTY,
+            message: '当前连接是 WorkBuddy，请选择自定义音色。Codex 原声仅用于 Codex 连接。',
+          });
+          return;
+        }
+        if (value.workbuddy !== true && value.source !== 'codex') throw new Error('Voice source unavailable');
         const create = value.workbuddy === true ? createWorkBuddyVoiceControl : createCodexLiveVoiceControl;
         inner = create({
           ...options,
@@ -421,6 +432,30 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
   const [data, setData] = rt.useState<LiveData>({ ...EMPTY });
   const [customStyle, setStyle] = rt.useState<LiveVoiceStyleId>(DEFAULT_LIVE_VOICE_STYLE);
   const [mode, setMode] = rt.useState<'natural' | 'custom'>('custom');
+  const [source, setSource] = rt.useState('codex');
+  rt.useEffect(() => {
+    let live = true;
+    const update = (): void => {
+      void fetch(ROUTE_SEGMENT + '/voice/conversation/options')
+        .then((r) => r.json())
+        .then((value) => {
+          if (!live) return;
+          setSource(value.source || '');
+          if (value.workbuddy === true) setMode('custom');
+        })
+        .catch(() => {});
+    };
+    const changed = (): void => {
+      document.dispatchEvent(new Event('pet-stop-live-voice'));
+      update();
+    };
+    update();
+    window.addEventListener('pet-ai-source-changed', changed);
+    return () => {
+      live = false;
+      window.removeEventListener('pet-ai-source-changed', changed);
+    };
+  }, []);
   const styleId = mode === 'natural' ? 'natural' : customStyle;
   const styleRef = rt.useRef(styleId);
   styleRef.current = styleId;
@@ -450,10 +485,12 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
   return rt.speechInput
     ? {
         ...data,
+        source,
         styleId,
         mode,
         chooseMode: (next) => {
-          if (!data.active && (next === 'natural' || next === 'custom')) setMode(next);
+          if (!data.active && (next === 'custom' || (next === 'natural' && source === 'codex')))
+            setMode(next as 'natural' | 'custom');
         },
         chooseStyle: (id) => {
           if (!data.active && liveVoiceStyle(id)?.synthesisVoice) setStyle(id as LiveVoiceStyleId);

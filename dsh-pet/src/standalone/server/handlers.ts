@@ -125,7 +125,7 @@ export function modelsHandler(
 /**
  * 创建余额查询处理器（POST）。
  *
- * 服务商与密钥都取自已保存的设置，请求体不参与：避免调用方把密钥经查询接口再传一遍。
+ * 本机 Codex / WorkBuddy 按本次选择查询，密钥仍由各自登录提供；不接收网页传入的密钥或地址。
  * @param ai - 设置服务。
  * @returns 处理请求的异步函数。
  */
@@ -142,7 +142,15 @@ export function balanceHandler(
       return;
     }
     try {
-      sendJson(res, 200, await ai.queryBalance());
+      const raw = asDraft(await readJsonBody(req));
+      if (
+        raw.protocol !== undefined &&
+        !['codex', 'workbuddy', 'openai-compatible', 'anthropic'].includes(raw.protocol)
+      ) {
+        sendJson(res, 400, { ok: false, reason: 'bad-request', message: '查询来源无效。' });
+        return;
+      }
+      sendJson(res, 200, await ai.queryBalance(raw.protocol ? { protocol: raw.protocol } : undefined));
     } catch {
       sendJson(res, 200, { ok: false, provider: '', reason: 'fetch-error', message: '余额查询失败' });
     }

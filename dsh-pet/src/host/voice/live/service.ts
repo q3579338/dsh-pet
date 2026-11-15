@@ -26,6 +26,7 @@ interface LiveDependencies {
   settings(petId: string): { prompt: string; model: string } | undefined;
   activeChanged(active: boolean): void;
   busy?(): boolean;
+  source?(): string | undefined;
   createClient?(cwd: string): LiveClient;
   identity?: typeof readCodexSpeechIdentity;
   createCall?: typeof createCodexLiveCall;
@@ -80,6 +81,8 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
   };
   return {
     async start(petId, sdp, signal, styleId = DEFAULT_LIVE_VOICE_STYLE) {
+      if (deps.source && deps.source() !== 'codex')
+        return { ok: false, message: 'Codex 原声仅用于 Codex 连接。当前选择 WorkBuddy 时请使用自定义音色。' };
       if (deps.busy?.()) return { ok: false, message: '请先结束当前的 WorkBuddy 连续语音。' };
       if (signal?.aborted) return { ok: false, message: '即时语音已停止。' };
       const settings = deps.settings(petId);

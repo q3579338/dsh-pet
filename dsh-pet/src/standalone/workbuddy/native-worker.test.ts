@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 const worker = createRequire(import.meta.url)('../../../runtime/workbuddy-native.cjs') as {
   inputRequest(value: unknown): unknown;
   catalogModels(value: unknown): Array<{ id: string; name: string }>;
+  resourceBalance(value: unknown): { plan: string; total: number; left: number; used: number };
   chatFrames(): { accept(line: string): unknown[]; finish(): void };
   runRequest(
     input: unknown,
@@ -12,6 +13,71 @@ const worker = createRequire(import.meta.url)('../../../runtime/workbuddy-native
     session: () => { headers: Record<string, string> },
   ): Promise<void>;
 };
+test('订阅余额缺失不能编造成零，实际零余额与小数保留，额外账号信息不返回', () => {
+  assert.deepEqual(
+    worker.resourceBalance({
+      SubscriptionPackageName: '体验版',
+      Packages: [{ CycleTotalCapacity: '100', CycleRemainCapacity: '0', CycleUsedCapacity: '100', account: 'private' }],
+    }),
+    { plan: '体验版', total: 100, left: 0, used: 100 },
+  );
+  assert.deepEqual(
+    worker.resourceBalance({ Packages: [{ CycleTotalCapacity: 2, CycleRemainCapacity: 0.5, CycleUsedCapacity: 1.5 }] }),
+    { plan: '', total: 2, left: 0.5, used: 1.5 },
+  );
+  for (const value of [
+    null,
+    {},
+    { Packages: [] },
+    { Packages: [{ CycleTotalCapacity: null, CycleRemainCapacity: 0, CycleUsedCapacity: 0 }] },
+  ])
+    assert.throws(() => worker.resourceBalance(value));
+});
+test('WorkBuddy识别和订阅查询固定官方入口，不接受网页提供的地址或密钥', async () => {
+  for (const action of ['balance', 'hear']) {
+    const wave = Buffer.alloc(44);
+    wave.write('RIFF');
+    wave.write('WAVE', 8);
+    const frames: Record<string, unknown>[] = [];
+    await worker.runRequest(
+      { action, audio: wave.toString('base64'), endpoint: 'https://wrong.test', apiKey: 'ignored' },
+      async (value) => {
+        frames.push(value);
+      },
+      async (url, init) => {
+        assert.equal(
+          url,
+          action === 'balance'
+            ? 'https://www.workbuddy.cn/billing/meter/get-user-resource-summary'
+            : 'https://www.workbuddy.cn/agenttool/v1/asr',
+        );
+        assert.equal(init?.redirect, 'error');
+        assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer existing-session');
+        if (action === 'hear') {
+          assert.ok(init?.body instanceof FormData);
+          assert.ok(init.body.get('audio') instanceof Blob);
+        }
+        return new Response(
+          JSON.stringify(
+            action === 'hear'
+              ? { code: 0, text: '识别成功' }
+              : {
+                  code: 0,
+                  data: {
+                    SubscriptionPackageName: '套餐',
+                    Packages: [{ CycleTotalCapacity: 1, CycleRemainCapacity: 1, CycleUsedCapacity: 0 }],
+                  },
+                },
+          ),
+        );
+      },
+      () => ({ headers: { Authorization: 'Bearer existing-session', 'Content-Type': 'application/json' } }),
+    );
+    assert.equal(frames[0].type, action === 'hear' ? 'transcript' : 'balance');
+    assert.equal(frames[frames.length - 1].type, 'done');
+    assert.equal(JSON.stringify(frames).includes('existing-session'), false);
+  }
+});
 test('内置目录来自在线配置，DeepSeek 优先，过滤媒体与自定义模型', () => {
   const models = worker.catalogModels({
     code: 0,

@@ -413,7 +413,13 @@ test('WorkBuddy 模型来源可选、凭据字段隐藏，切回 Codex 保留本
   assert.equal(page.element('workbuddy-note').hidden, false);
   assert.equal(page.element('apiKey').hidden, true);
   assert.equal(page.element('baseUrl').hidden, true);
-  assert.equal(page.element('balance-btn').hidden, true);
+  assert.equal(page.element('balance-btn').hidden, false);
+  assert.equal(page.element('balance-btn').disabled, false);
+  assert.match(page.element('balance-btn').textContent, /WorkBuddy/u);
+  await page.element('balance-btn').listeners.click();
+  const balanceRequest = page.requests.filter((row) => row.url === '/standalone-ai/balance').pop();
+  assert.ok(balanceRequest);
+  assert.equal(JSON.parse(balanceRequest.options.body ?? '{}').protocol, 'workbuddy');
   assert.match(page.element('balance-provider-note').textContent, /WorkBuddy/u);
   page.element('model').value = 'glm-5.0-turbo';
   select('本机 Codex（沿用已有登录）');

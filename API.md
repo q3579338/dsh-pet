@@ -169,9 +169,11 @@ dsh-pet 的宿主半侧向 DSH 自己的 Web 服务注册了**一条前缀路由
 
 ## 独立版 WorkBuddy 连续语音
 
-`.16` 的 `/voice/conversation/` 路径沿用独立服务现有的本地鉴权。`GET options` 返回当前是否选择 WorkBuddy 及型号；`POST start` 接受 `petId`、`styleId`，返回本通 `sessionId`。`GET events?sessionId=…` 返回持续 NDJSON（ready、partial、user、reply、model、text、done、interrupted、error、ping），其中 model 为实际服务端型号；错误只有固定安全文案。
+`/voice/conversation/` 路径沿用独立服务现有的本地鉴权。`GET options` 返回当前 source、是否选择 WorkBuddy 及型号；`POST start` 接受 `petId`、`styleId`，返回本通 `sessionId`。`.17` 使用 WorkBuddy 自己的原生流式识别，不经过 Codex。`GET events?sessionId=…` 返回持续 NDJSON（ready、partial、user、reply、model、text、done、interrupted、error、ping），其中 model 为实际服务端型号；错误只有固定安全文案。
 
 `POST audio` 发送 `sessionId`、递增的 `utterance`、从0开始的 `sequence`、base64 单声道16kHz PCM16（每包不超过16KiB）。`POST end` 接受 `sessionId`、`utterance`，结束当前听写并启动流式回答。`POST interrupt` 取消旧回答；`POST touch` 每15秒续租；`POST stop` 幂等释放。本通事件流断开或40秒不续租也会释放。不写入普通聊天记忆。声音继续通过已有 `/voice/stream` 和选定的原创调音预设播放，失败不切换音色。
+
+`.17` 的 `/voice/hear` 同样按已保存的连接来源隔离：Codex仅使用Codex识别，WorkBuddy仅使用WorkBuddy识别；显式传入另一家的provider返回unsupported。`/voice/hear-providers` 仅列当前来源。独立设置的 `POST /standalone-ai/balance` 可带 `{protocol:'codex'}` 或 `{protocol:'workbuddy'}` 查询界面当前选择，不修改已保存设置；不接受网页给出的账号令牌、密钥或其它地址。未传protocol时沿用已保存来源。
 
 ## 相关
 

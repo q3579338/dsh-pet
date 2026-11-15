@@ -113,7 +113,7 @@ export interface StandaloneAiService {
   /** 按协议拉取端点声明可用的模型；失败时 code 稳定、message 可直接展示。 */
   discoverModels(input: ModelDiscoveryInput): Promise<ModelDiscoveryResult>;
   /** 按设置里选中的服务商查询余额；未选择或缺少密钥时返回显式失败，绝不伪造数字。 */
-  queryBalance(): Promise<BalanceResult>;
+  queryBalance(input?: { protocol?: string }): Promise<BalanceResult>;
   /** 余额查询要用的服务商与密钥；供宿主半侧的余额轮询取用，不进对外设置视图。 */
   balanceAuth(): StandaloneBalanceAuth;
   /** 单独保存的 DeepSeek 语音密钥；空串表示没单独配。 */
@@ -126,6 +126,7 @@ export interface StandaloneAiService {
 
 /** 可注入的传输，仅供测试替换；生产使用官方 SDK。 */
 export interface StandaloneAiDependencies {
+  codexAccount?: { read(): Promise<BalanceResult>; dispose(): void };
   /** 替换 fetch 以隔离网络。 */
   fetch?: AiFetch;
   /** 隔离验证可替换 WorkBuddy 运行组件，不访问真实账号。 */

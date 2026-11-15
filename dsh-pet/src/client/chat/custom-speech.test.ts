@@ -7,7 +7,35 @@ async function tick(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-test('较短的完整首句立即合成，不等八个字或整轮结束', async () => {
+test('问候语碎片合并成完整短句，不能把嗨、你好拆成多段造成结巴', async () => {
+  const requested: string[] = [];
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        return new Blob([text]);
+      },
+      play: async () => {},
+    },
+  });
+  try {
+    queue.begin();
+    queue.append('嗨，');
+    await tick();
+    queue.append('你好！');
+    await tick();
+    assert.deepEqual(requested, []);
+    queue.append('想聊点什么或者需要我帮你做点什么吗？');
+    queue.finish();
+    await tick();
+    assert.deepEqual(requested, ['嗨，你好！想聊点什么或者需要我帮你做点什么吗？']);
+  } finally {
+    queue.dispose();
+  }
+});
+
+test('短问候不抢先拆开，完整回答确认后立即朗读且正文不丢失', async () => {
   const requested: string[] = [];
   const queue = createCustomSpeechQueue({
     failure: () => assert.fail(),
@@ -22,7 +50,7 @@ test('较短的完整首句立即合成，不等八个字或整轮结束', async
   queue.begin();
   queue.append('你好呀，');
   await tick();
-  assert.deepEqual(requested, ['你好呀，']);
+  assert.deepEqual(requested, []);
   queue.append('今天也陪着你。');
   queue.finish();
   await tick();
@@ -42,6 +70,9 @@ test('较短的完整首句立即合成，不等八个字或整轮结束', async
   next.begin();
   next.append('好！');
   await tick();
+  assert.deepEqual(short, []);
+  next.finish();
+  await tick();
   assert.deepEqual(short, ['好！']);
   next.dispose();
 });
@@ -60,12 +91,12 @@ test('首句持续出字也有固定等待上限，不被每个新增字反复�
     },
   });
   queue.begin();
-  queue.append('我来帮你');
-  t.mock.timers.tick(80);
-  queue.append('看看');
-  t.mock.timers.tick(80);
+  queue.append('我来帮你看看这个问题应该如何处理');
+  t.mock.timers.tick(200);
+  queue.append('得更顺畅');
+  t.mock.timers.tick(200);
   await tick();
-  assert.deepEqual(requested, ['我来帮你看看']);
+  assert.deepEqual(requested, ['我来帮你看看这个问题应该如何处理得更顺畅']);
   queue.begin();
   queue.append('新的内容');
   queue.interrupt();
@@ -127,17 +158,20 @@ test('首批文字很短时只等待一次截止时间，后续凑够正文立�
   });
   queue.begin();
   queue.append('听');
-  t.mock.timers.tick(160);
+  t.mock.timers.tick(400);
   queue.append('到你');
   await tick();
   assert.deepEqual(requested, []);
   queue.append('啦');
   await tick();
-  assert.deepEqual(requested, ['听到你啦']);
+  assert.deepEqual(requested, []);
+  queue.append('，我们可以一起慢慢聊聊今天的事情');
+  await tick();
+  assert.equal(requested.length, 1);
   queue.append('，一起聊聊吧。');
   queue.finish();
   await tick();
-  assert.equal(requested.join(''), '听到你啦，一起聊聊吧。');
+  assert.equal(requested.join(''), '听到你啦，我们可以一起慢慢聊聊今天的事情，一起聊聊吧。');
   queue.dispose();
 });
 

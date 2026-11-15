@@ -45,7 +45,9 @@ test('WorkBuddy 协议无需 API Key，模型和测试走 WorkBuddy；即时语�
     });
     assert.equal(ai.isReady(), true);
     assert.equal(ai.codexVoiceModel?.(), 'default');
-    assert.deepEqual(ai.balanceAuth(), { provider: '', apiKey: '' });
+    assert.equal(ai.balanceAuth().provider, 'workbuddy');
+    assert.equal(ai.balanceAuth().apiKey, '');
+    assert.equal(typeof ai.balanceAuth().query, 'function');
     assert.equal((await ai.queryBalance()).ok, false);
     assert.equal((await ai.discoverModels({ protocol: 'workbuddy' })).ok, true);
     assert.equal((await ai.testConnection({ protocol: 'workbuddy', model: 'glm-5.0-turbo' })).reply, '连接成功');

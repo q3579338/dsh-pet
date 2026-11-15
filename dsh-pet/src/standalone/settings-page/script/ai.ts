@@ -41,16 +41,17 @@ function syncProtocolFields() {
   if (byId('balance-provider-label')) byId('balance-provider-label').textContent = codex ? 'Codex 额度与用量' : workbuddy ? 'WorkBuddy 额度' : '余额查询服务商';
   if (byId('balance-provider-note')) byId('balance-provider-note').textContent = codex
     ? '读取当前 Codex 的套餐、窗口剩余额度、重置时间、额外点数和 Token 活动。额外点数以 Credits 显示；结果最多缓存 30 秒。'
-    : workbuddy ? '请在 WorkBuddy 中查看额度，当前接入未提供余额查询。' : '选定余额服务商后，用保存的对应密钥查询余额。';
+    : workbuddy ? '读取当前国内版 WorkBuddy 的套餐、本期积分总量、已用和剩余积分。与 Codex 订阅分开查询。' : '选定余额服务商后，用保存的对应密钥查询余额。';
   if (byId('balance-btn')) {
-    byId('balance-btn').textContent = codex ? '刷新 Codex 额度与用量' : '查询余额';
-    byId('balance-btn').hidden = workbuddy;
-    byId('balance-btn').disabled = workbuddy || (!codex && (!balanceSelect || balanceSelect.getValue() === ''));
+    byId('balance-btn').textContent = codex ? '刷新 Codex 额度与用量' : workbuddy ? '刷新 WorkBuddy 套餐与积分' : '查询余额';
+    byId('balance-btn').hidden = false;
+    byId('balance-btn').disabled = !codex && !workbuddy && (!balanceSelect || balanceSelect.getValue() === '');
   }
   byId('model').placeholder = codex ? 'default：跟随本机 Codex，或从列表选择' : workbuddy ? '从 WorkBuddy 内置模型在线目录选择' : '填写或拉取模型 ID';
   if (byId('model-note')) byId('model-note').textContent = workbuddy ? '点右侧箭头读取 WorkBuddy 在线内置模型目录，DeepSeek 优先显示；选好后点击测试连接确认实际可用。' : '可以直接手填；点右侧箭头拉取模型列表后选择，选择后保存到本机。';
   if (codex && !byId('model').value.trim()) byId('model').value = 'default';
   if (workbuddy && !byId('model').value.trim()) byId('model').value = 'deepseek-v4-flash';
+  if (typeof updateSpeechSource === 'function') updateSpeechSource();
 }
 
 async function aiRequest(method, body) {
@@ -89,12 +90,13 @@ function populateAi(data) {
   byId('deepseekApiKey').disabled = false;
   syncProtocolFields();
   markDirty(false, 'ai');
+  window.dispatchEvent(new CustomEvent('pet-ai-source-changed'));
 }
 
 /** 把余额结果翻成一行可读文案；失败一律说明原因，不显示伪造数字。 */
 function describeBalance(data) {
   if (!data || data.ok !== true) {
-    if (data && data.provider === 'codex' && typeof data.message === 'string') return data.message;
+    if (data && (data.provider === 'codex' || data.provider === 'workbuddy') && typeof data.message === 'string') return data.message;
     if (data && data.reason === 'credential-missing') return '缺少密钥：请先保存所选服务商的 API 密钥。';
     if (data && data.reason === 'unsupported') return '该服务商不提供余额查询。';
     return data && data.message ? '查询失败：' + data.message : '查询失败，请稍后重试。';
@@ -109,7 +111,7 @@ function describeBalance(data) {
   }
   if (data.shape === 'points') return payload.total + ' ' + payload.unit;
   if (data.shape === 'windows') return '月度已用 ' + payload.monthly + '%';
-  if (data.provider === 'codex' && data.shape === 'custom' && Array.isArray(payload.views)) {
+  if ((data.provider === 'codex' || data.provider === 'workbuddy') && data.shape === 'custom' && Array.isArray(payload.views)) {
     function lines(node, depth) {
       if (!node || depth > 6) return [];
       return (typeof node.text === 'string' ? [node.text] : []).concat(
@@ -127,7 +129,7 @@ function wireBalanceQuery() {
   button.addEventListener('click', async () => {
     const queriedProtocol = protocolSelect && protocolSelect.getValue();
     button.disabled = true;
-    result.className = queriedProtocol === 'codex' ? 'status codex-balance' : 'status';
+    result.className = ['codex', 'workbuddy'].includes(queriedProtocol) ? 'status codex-balance' : 'status';
     result.dataset.ok = '';
     result.dataset.error = '';
     result.textContent = queriedProtocol === 'codex' ? '正在读取 Codex 额度与用量…' : '正在查询余额…';
@@ -136,7 +138,8 @@ function wireBalanceQuery() {
         method: 'POST',
         credentials: 'same-origin',
         cache: 'no-store',
-        headers: { 'X-DSH-Pet-Token': TOKEN },
+        headers: { 'X-DSH-Pet-Token': TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ protocol: queriedProtocol }),
       });
       if (!response.ok) throw new Error('查询被拒绝（HTTP ' + response.status + '）');
       const data = await response.json();
@@ -150,7 +153,8 @@ function wireBalanceQuery() {
       result.dataset.error = 'true';
       result.textContent = '✗ ' + (error && error.message ? error.message : String(error));
     } finally {
-      button.disabled = (protocolSelect && protocolSelect.getValue() === 'workbuddy') || (!(protocolSelect && protocolSelect.getValue() === 'codex') && (!balanceSelect || balanceSelect.getValue() === ''));
+      const local = protocolSelect && ['codex', 'workbuddy'].includes(protocolSelect.getValue());
+      button.disabled = !local && (!balanceSelect || balanceSelect.getValue() === '');
     }
   });
 }

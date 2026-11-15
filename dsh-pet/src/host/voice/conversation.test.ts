@@ -140,7 +140,7 @@ test('设置变化不偷偷切模型，错误后仍能结束和重开', async ()
     const rows = await f.until('error');
     assert.equal(f.requests.length, 0);
     assert.ok(rows.some((row) => row.type === 'error' && row.fatal === false));
-    assert.equal(f.service.touch(f.id), true);
+    assert.equal(f.service.touch(f.id), false);
   } finally {
     f.service.dispose();
   }

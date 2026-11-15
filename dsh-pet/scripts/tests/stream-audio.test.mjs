@@ -9,12 +9,14 @@ import { chromium } from 'playwright';
 import { rolldown } from 'rolldown';
 
 test(
-  '真实 MP3 尚未传完就开始播放；取消立即释放流播放器，完整音频仍可播放',
+  '真实 MP3 带首包缓冲抵抗抖动、未传完即可播放；取消释放，完整音频可播放',
   { skip: !process.env.DSH_PET_STREAM_SAMPLE },
   async () => {
     const sample = await readFile(process.env.DSH_PET_STREAM_SAMPLE);
     const bundle = await rolldown({
-      input: fileURLToPath(new URL('../../src/shared/stream-audio.ts', import.meta.url)),
+      input:
+        process.env.DSH_PET_STREAM_MODULE ||
+        fileURLToPath(new URL('../../src/shared/stream-audio.ts', import.meta.url)),
       platform: 'browser',
     });
     const { output } = await bundle.generate({ format: 'esm' });
@@ -28,6 +30,18 @@ test(
       } else if (req.url === '/complete') {
         res.writeHead(200, { 'content-type': 'audio/mpeg' });
         res.end(sample);
+      } else if (req.url.startsWith('/jitter')) {
+        const url = new URL(req.url, 'http://localhost');
+        const first = Number(url.searchParams.get('first')),
+          second = Number(url.searchParams.get('second'));
+        res.writeHead(200, { 'content-type': 'audio/mpeg' });
+        res.write(sample.subarray(0, first));
+        setTimeout(() => {
+          if (!res.destroyed) res.write(sample.subarray(first, second));
+        }, 440);
+        setTimeout(() => {
+          if (!res.destroyed) res.end(sample.subarray(second));
+        }, 750);
       } else if (req.url === '/audio') {
         res.writeHead(200, { 'content-type': 'audio/mpeg' });
         const middle = Math.floor(sample.length * 0.7);
@@ -81,6 +95,42 @@ test(
       release();
       await page.waitForFunction(() => window.done);
       assert.equal(await page.locator('audio').count(), 0);
+      const jitter = await page.evaluate(async () => {
+        const bytes = await (await fetch('/complete')).arrayBuffer();
+        const decoded = await new OfflineAudioContext(1, 1, 48000).decodeAudioData(bytes.slice(0));
+        const first = Math.floor(bytes.byteLength * Math.min(0.24 / decoded.duration, 0.2));
+        const second = Math.floor(bytes.byteLength * Math.min(0.94 / decoded.duration, 0.7));
+        let waiting = 0,
+          started = false,
+          startDelay = 0;
+        const beganAt = performance.now();
+        const observer = new MutationObserver((records) => {
+          for (const record of records)
+            for (const node of record.addedNodes)
+              if (node instanceof HTMLAudioElement)
+                node.addEventListener('waiting', () => {
+                  if (started) waiting++;
+                });
+        });
+        observer.observe(document.body, { childList: true });
+        await speech.playSpeechAudio(await fetch('/jitter?first=' + first + '&second=' + second), {
+          signal: new AbortController().signal,
+          volume: 0,
+          voice: 'bigfish-cute/starbell-v1',
+          started() {
+            started = true;
+            startDelay = performance.now() - beganAt;
+          },
+        });
+        observer.disconnect();
+        return { waiting, started, duration: decoded.duration, startDelay };
+      });
+      assert.equal(jitter.started, true);
+      assert.equal(
+        jitter.waiting,
+        0,
+        '240ms first packet followed by 440ms network jitter must not start and repeatedly run dry',
+      );
       completed = false;
       await page.evaluate(async () => {
         window.started = 0;

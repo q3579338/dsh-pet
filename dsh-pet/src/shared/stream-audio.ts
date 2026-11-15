@@ -25,6 +25,9 @@ export function playSpeechAudio(
     let buffer: SourceBuffer | undefined;
     let done = false;
     let began = false;
+    let fullyReceived = false;
+    let waitingForBuffer = false;
+    let requestedPlay = false;
     const cancelled = new AbortController();
     const settle = (ok: boolean): void => {
       if (done) return;
@@ -36,6 +39,7 @@ export function playSpeechAudio(
       audio.onended = null;
       audio.onerror = null;
       audio.onplaying = null;
+      audio.onwaiting = null;
       audio.pause();
       audio.removeAttribute('src');
       audio.load();
@@ -54,6 +58,12 @@ export function playSpeechAudio(
         began = true;
         options.started();
       }
+    };
+    audio.onwaiting = () => {
+      if (done || !began || fullyReceived) return;
+      waitingForBuffer = true;
+      audio.pause();
+      document.dispatchEvent(new CustomEvent('pet-voice-buffering', { detail: { voice: options.voice } }));
     };
     const wait = (target: EventTarget, event: string): Promise<void> =>
       new Promise((finish, fail) => {
@@ -86,12 +96,22 @@ export function playSpeechAudio(
         if (done) return;
         buffer = media.addSourceBuffer('audio/mpeg');
         reader = payload.body.getReader();
-        let requestedPlay = false;
+        let received = false;
+        const maybePlay = (complete = false): void => {
+          if (done || (requestedPlay && !waitingForBuffer)) return;
+          const ranges = buffer!.buffered;
+          const available = ranges.length ? Math.max(0, ranges.end(ranges.length - 1) - audio.currentTime) : 0;
+          if (!complete && available < (waitingForBuffer ? 0.55 : 0.32)) return;
+          requestedPlay = true;
+          waitingForBuffer = false;
+          void audio.play().catch(abort);
+        };
         for (;;) {
           const next = await reader.read();
           if (done) return;
           if (next.done) break;
           if (!next.value.length) continue;
+          received = true;
           const appended = wait(buffer, 'updateend');
           try {
             buffer.appendBuffer(new Uint8Array(next.value));
@@ -101,16 +121,16 @@ export function playSpeechAudio(
           }
           await appended;
           if (done) return;
-          if (!requestedPlay) {
-            requestedPlay = true;
-            void audio.play().catch(abort);
-          }
+          maybePlay();
         }
-        if (!requestedPlay) throw new Error('Empty speech stream');
+        if (!received) throw new Error('Empty speech stream');
+        fullyReceived = true;
         if (media.readyState === 'open') media.endOfStream();
+        maybePlay(true);
       } else {
         const blob = payload instanceof Response ? await payload.blob() : payload;
         if (done) return;
+        fullyReceived = true;
         url = URL.createObjectURL(blob);
         audio.src = url;
         void audio.play().catch(abort);

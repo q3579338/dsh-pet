@@ -1,6 +1,13 @@
 /** WorkBuddy 独立进程只返回模型目录、正文和固定失败类别，身份不进入这条管道。 */
 import type { DiscoveredModel } from '../ai-provider/types.ts';
 import { WorkBuddyFailure } from './executable.ts';
+/** WorkBuddy 订阅接口的白名单快照，不包含身份与账号编号。 */
+export interface WorkBuddyQuota {
+  plan: string;
+  total: number;
+  left: number;
+  used: number;
+}
 /** 不透传运行组件或上游的任意错误正文。 */
 export function workBuddyError(code: unknown): WorkBuddyFailure {
   const messages: Record<string, string> = {
@@ -34,7 +41,13 @@ export function parseWorkBuddyModels(value: unknown): DiscoveredModel[] {
 }
 /** 每个请求拥有独立完成状态；中途断连不能计为成功。 */
 export function workBuddyEvents(): {
-  accept(line: string): { text?: string; modelUsed?: string; models?: DiscoveredModel[] };
+  accept(line: string): {
+    text?: string;
+    modelUsed?: string;
+    models?: DiscoveredModel[];
+    balance?: WorkBuddyQuota;
+    transcript?: string;
+  };
   finish(): void;
 } {
   let done = false,
@@ -58,6 +71,24 @@ export function workBuddyEvents(): {
         return {};
       }
       if (v.type === 'models') return { models: parseWorkBuddyModels(v.models) };
+      if (v.type === 'balance') {
+        const value = v.balance as WorkBuddyQuota | undefined;
+        if (
+          !value ||
+          typeof value.plan !== 'string' ||
+          value.plan.length > 150 ||
+          !['total', 'left', 'used'].every(
+            (key) =>
+              typeof value[key as keyof WorkBuddyQuota] === 'number' &&
+              Number.isFinite(value[key as keyof WorkBuddyQuota]) &&
+              Number(value[key as keyof WorkBuddyQuota]) >= 0,
+          )
+        )
+          throw new WorkBuddyFailure('WorkBuddy 套餐数据无效，请重试。');
+        return { balance: { plan: value.plan, total: value.total, left: value.left, used: value.used } };
+      }
+      if (v.type === 'transcript' && typeof v.text === 'string' && v.text.length <= 16000)
+        return { transcript: v.text };
       if (v.type === 'model' && validWorkBuddyModel(v.model)) return { modelUsed: v.model };
       if (v.type === 'text' && typeof v.text === 'string') {
         chars += v.text.length;

@@ -31,6 +31,8 @@ import { ensureCuteVoices } from './voice/builtin-cute.ts';
 import { ensureWindowsSpeech } from './voice/windows/providers.ts';
 import { ensureCodexSpeech } from './voice/codex/provider.ts';
 import { createLiveVoiceService } from './voice/live/service.ts';
+import { createWorkBuddyDictation } from '../standalone/workbuddy/dictation.ts';
+import { ensureWorkBuddySpeech } from './voice/workbuddy-provider.ts';
 import { createVoiceConversation } from './voice/conversation.ts';
 import type { StandaloneModelService } from '../standalone/llm-facade.ts';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
@@ -139,6 +141,7 @@ export function apply(ctx: any): void {
   if (process.env.DSH_PET_CODEX === '1') {
     ensureWindowsSpeech();
     ensureCodexSpeech();
+    ensureWorkBuddySpeech(userRoot);
     ensureCuteVoices();
   } else ensureDshSpeechProvider({ speechToText: () => setup.optionalService('speechToText') });
   // DeepSeek 官方语音：鉴权复用 DSH 的 DEEPSEEK_API_KEY，与余额那条路一致；
@@ -179,6 +182,7 @@ export function apply(ctx: any): void {
             };
           },
           busy: () => workbuddyVoiceActive,
+          source: () => voiceAi?.voiceSelection?.()?.protocol,
           activeChanged: (active) => {
             nativeVoiceActive = active;
             state.writeSection('voiceSession', { active: nativeVoiceActive || workbuddyVoiceActive });
@@ -209,6 +213,7 @@ export function apply(ctx: any): void {
           },
           stream: (model, request, signal) => voiceAi.voiceStream!(model, request, signal),
           prepare: (active) => voiceAi.prepareVoice?.(active) ?? Promise.resolve(),
+          dictation: (partial, signal) => createWorkBuddyDictation(userRoot, partial, signal),
           busy: () => nativeVoiceActive,
           activeChanged: (active) => {
             workbuddyVoiceActive = active;
@@ -243,6 +248,7 @@ export function apply(ctx: any): void {
     voiceConversation,
     // 语音识别：实现来自注册表；请求没带 provider 时用配置里的那个值，没有第二份默认
     speech: createHearService({
+      ...(process.env.DSH_PET_CODEX === '1' ? { source: () => voiceAi?.voiceSelection?.()?.protocol } : {}),
       configuredProvider: () => {
         const provider = readAllConfig(configPaths).main?.speechProvider;
         return typeof provider === 'string' && provider ? provider : undefined;

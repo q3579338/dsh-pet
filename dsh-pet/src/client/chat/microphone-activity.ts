@@ -7,7 +7,7 @@ export function microphoneSpeechGate(onSpeech: () => void): (rms: number, millis
     if (rms > 0.012) {
       active += milliseconds;
       silence = 0;
-      if (active >= 64 && !speaking) {
+      if (active >= 160 && !speaking) {
         speaking = true;
         onSpeech();
       }

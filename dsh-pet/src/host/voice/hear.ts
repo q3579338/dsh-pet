@@ -118,16 +118,36 @@ async function withDeadline<T>(
  */
 export function createHearService(options: {
   configuredProvider?: () => string | undefined;
+  /** 独立版按顶部来源隔离识别，显式传入其它来源也不得越过此限制。 */
+  source?: () => string | undefined;
   timeoutMs?: number;
 }): HearService {
   return {
-    list: listSpeechCatalog,
+    list: () => {
+      const catalog = listSpeechCatalog();
+      return options.source
+        ? { ...catalog, providers: catalog.providers.filter((provider) => provider.id === options.source!()) }
+        : catalog;
+    },
     async hear(raw, signal) {
       const parsed = parseHearInput(raw);
       if (!parsed.ok) return { ok: false, reason: 'bad-request', message: parsed.message };
 
       // 唯一的「默认」来源：请求显式给的，或者用户配置里那个值。查不到就是查不到，不替他挑。
-      const providerId = parsed.value.provider ?? options.configuredProvider?.();
+      const source = options.source?.();
+      if (options.source && (!source || !['codex', 'workbuddy'].includes(source)))
+        return {
+          ok: false,
+          reason: 'unsupported',
+          message: '当前模型来源没有已接入的语音识别，请在顶部选择 Codex 或 WorkBuddy。',
+        };
+      if (source && parsed.value.provider && parsed.value.provider !== source)
+        return {
+          ok: false,
+          reason: 'unsupported',
+          message: '语音识别必须使用当前连接的 ' + (source === 'workbuddy' ? 'WorkBuddy' : 'Codex') + '，请刷新设置。',
+        };
+      const providerId = source ?? parsed.value.provider ?? options.configuredProvider?.();
       if (!providerId) return { ok: false, reason: 'bad-request', message: 'provider is required' };
       const provider = resolveSpeechProvider(providerId);
       if (!provider) {
@@ -139,6 +159,8 @@ export function createHearService(options: {
       const run = await withDeadline(signal, timeoutMs, (inner) =>
         provider.transcribe({ audio: parsed.value.audio, signal: inner }),
       );
+      if (source && options.source?.() !== source)
+        return { ok: false, reason: 'unsupported', message: '识别期间连接来源已切换，请重新录音。' };
       if (!run.ok) {
         return { ok: false, reason: run.unavailable ? 'unsupported' : 'generate-error', message: run.message };
       }

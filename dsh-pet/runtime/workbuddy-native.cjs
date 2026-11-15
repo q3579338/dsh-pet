@@ -18,8 +18,19 @@ function modelId(value) {
   return typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/.test(value) && !value.startsWith('custom');
 }
 function inputRequest(value) {
-  if (!value || typeof value !== 'object' || !['models', 'chat'].includes(value.action)) throw failure('input');
-  if (value.action === 'models') return { action: 'models' };
+  if (!value || typeof value !== 'object' || !['models', 'chat', 'balance', 'hear'].includes(value.action))
+    throw failure('input');
+  if (value.action === 'models' || value.action === 'balance') return { action: value.action };
+  if (value.action === 'hear') {
+    if (
+      typeof value.audio !== 'string' ||
+      value.audio.length > 3000000 ||
+      value.audio.length % 4 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(value.audio)
+    )
+      throw failure('input');
+    return { action: 'hear', audio: value.audio };
+  }
   const request = value.request;
   if (
     !modelId(value.model) ||
@@ -220,7 +231,37 @@ async function runRequest(input, emit, fetcher = fetch, getSession = nativeSessi
   const request = inputRequest(input);
   const { headers } = getSession();
   try {
-    if (request.action === 'models') {
+    if (request.action === 'balance') {
+      const response = await fetcher(ORIGIN + '/billing/meter/get-user-resource-summary', {
+        method: 'POST',
+        headers: { ...headers, 'Accept-Language': 'zh' },
+        body: '{}',
+        redirect: 'error',
+        signal: AbortSignal.timeout(15000),
+      });
+      const body = await jsonBody(response);
+      if (!response.ok || body?.code !== 0) throw upstreamFailure(response.status, body);
+      await emit({ type: 'balance', balance: resourceBalance(body.data) });
+    } else if (request.action === 'hear') {
+      const audio = Buffer.from(request.audio, 'base64');
+      if (audio.length < 44 || audio.toString('ascii', 0, 4) !== 'RIFF' || audio.toString('ascii', 8, 12) !== 'WAVE')
+        throw failure('input');
+      const form = new FormData();
+      form.append('audio', new Blob([audio], { type: 'audio/wav' }), 'voice.wav');
+      const asrHeaders = { ...headers };
+      delete asrHeaders['Content-Type'];
+      const response = await fetcher(ORIGIN + '/agenttool/v1/asr', {
+        method: 'POST',
+        headers: asrHeaders,
+        body: form,
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+      });
+      const body = await jsonBody(response);
+      if (!response.ok || (body?.code !== undefined && body.code !== 0)) throw upstreamFailure(response.status, body);
+      if (typeof body.text !== 'string' || body.text.length > 16000) throw failure('upstream');
+      await emit({ type: 'transcript', text: body.text });
+    } else if (request.action === 'models') {
       const response = await fetcher(ORIGIN + '/v3/config', {
         headers,
         redirect: 'error',
@@ -278,13 +319,142 @@ async function runRequest(input, emit, fetcher = fetch, getSession = nativeSessi
   }
 }
 
-module.exports = { inputRequest, catalogModels, chatFrames, runRequest };
+/** 仅返回套餐名与服务端明确提供的积分数字，空响应不能当作零余额。 */
+function resourceBalance(data) {
+  if (!data || !Array.isArray(data.Packages) || data.Packages.length > 100) throw failure('upstream');
+  const number = (value) => {
+    if ((typeof value !== 'number' && typeof value !== 'string') || value === '') throw failure('upstream');
+    const result = Number(value);
+    if (!Number.isFinite(result) || result < 0) throw failure('upstream');
+    return result;
+  };
+  if (!data.Packages.length) throw failure('upstream');
+  const packages = data.Packages.map((p) => ({
+    total: number(p.CycleTotalCapacity),
+    left: number(p.CycleRemainCapacity),
+    used: number(p.CycleUsedCapacity),
+  }));
+  const sum = (key) => packages.reduce((n, p) => n + p[key], 0);
+  return {
+    plan: typeof data.SubscriptionPackageName === 'string' ? data.SubscriptionPackageName.slice(0, 150) : '',
+    total: sum('total'),
+    left: sum('left'),
+    used: sum('used'),
+  };
+}
+
+/** 国内版自己的流式识别；令牌只留在本辅助进程，音频原样发送，不接入 Codex。 */
+async function runAsr(emit) {
+  const { createInterface } = require('node:readline');
+  const { headers } = nativeSession();
+  const root = path.join(path.dirname(process.execPath), 'resources/app.asar');
+  const Socket = require(path.join(root, 'main/wrapper.js')).r;
+  const socket = new Socket(
+    ORIGIN.replace('https:', 'wss:') +
+      '/clientcap/v2/asr/stream?source=desktop&interim_results=1&session_id=' +
+      randomUUID(),
+    { headers, followRedirects: false, maxPayload: 65536 },
+  );
+  let settled = false,
+    ready = false,
+    finishing = false,
+    bytes = 0;
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  let runAsrStop;
+  let timer = setTimeout(() => stop('upstream'), 12000);
+  const done = new Promise((resolve) => {
+    socket.on('message', (raw) => {
+      if (settled) return;
+      try {
+        if (raw.length > 65536) throw failure('upstream');
+        const value = JSON.parse(raw.toString('utf8'));
+        if (value.code !== undefined && value.code !== 0) throw upstreamFailure(200, value);
+        if (!ready) {
+          ready = true;
+          clearTimeout(timer);
+          timer = setTimeout(() => stop('upstream'), 270000);
+          void emit({ type: 'asr-ready' });
+        }
+        if (typeof value.text === 'string' && value.text.length > 16000) throw failure('upstream');
+        if (value.final) {
+          settled = true;
+          clearTimeout(timer);
+          void emit({ type: 'asr-final', text: value.noise_reject ? '' : (value.text ?? '') }).then(() => {
+            socket.close();
+            lines.close();
+            resolve();
+          });
+        } else if (typeof value.text === 'string') void emit({ type: 'asr-partial', text: value.text });
+      } catch (error) {
+        stop(error?.publicCode ?? 'upstream');
+      }
+    });
+    socket.on('error', () => stop('upstream'));
+    socket.on('close', () => {
+      if (!settled) stop('upstream');
+    });
+    lines.on('line', (line) => {
+      if (settled) return;
+      try {
+        if (line.length > 24000 || !ready || socket.readyState !== Socket.OPEN) throw failure('input');
+        const value = JSON.parse(line);
+        if (value.type === 'finish' && !finishing) {
+          finishing = true;
+          clearTimeout(timer);
+          timer = setTimeout(() => stop('upstream'), 12000);
+          socket.send(Buffer.alloc(0));
+        } else if (
+          value.type === 'audio' &&
+          !finishing &&
+          typeof value.audio === 'string' &&
+          value.audio.length % 4 === 0 &&
+          /^[A-Za-z0-9+/]+={0,2}$/.test(value.audio)
+        ) {
+          const pcm = Buffer.from(value.audio, 'base64');
+          bytes += pcm.length;
+          if (!pcm.length || pcm.length % 2 || pcm.length > 16384 || bytes > 960000 || socket.bufferedAmount > 128000)
+            throw failure('input');
+          socket.send(pcm);
+        } else throw failure('input');
+      } catch (error) {
+        stop(error?.publicCode ?? 'input');
+      }
+    });
+    lines.on('close', () => {
+      if (!settled) stop('upstream');
+    });
+    function stop(code) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.terminate();
+      lines.close();
+      void emit({ type: 'error', code: ['auth', 'quota', 'input'].includes(code) ? code : 'upstream' }).then(resolve);
+    }
+    // 定时器只使用固定失败类别，绝不把底层异常文本输出。
+    runAsrStop = stop;
+  });
+  function stop(code) {
+    runAsrStop?.(code);
+  }
+  try {
+    await done;
+  } finally {
+    headers.Authorization = '';
+    clearTimeout(timer);
+    socket.terminate();
+    lines.close();
+  }
+}
+
+module.exports = { inputRequest, catalogModels, chatFrames, runRequest, resourceBalance };
 if (require.main === module) {
   process.stdout.on('error', () => process.exit(0));
   const emit = async (value) => {
     if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain');
   };
   (async () => {
+    if (process.argv.includes('--asr')) return runAsr(emit);
     if (process.argv.includes('--session')) {
       // 只复用网络连接；每次请求仍重新读取当前活动登录，不缓存账号令牌。
       const { createInterface } = require('node:readline');
@@ -313,7 +483,7 @@ if (require.main === module) {
     const chunks = [];
     for await (const part of process.stdin) {
       bytes += part.length;
-      if (bytes > 262144) throw failure('input');
+      if (bytes > 3100000) throw failure('input');
       chunks.push(part);
     }
     let input;

@@ -26,6 +26,7 @@ import type { BalanceResult } from '../../host/balance/types.ts';
 import { createWorkBuddyConnection } from '../workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../workbuddy/executable.ts';
 import { workBuddyVoiceStream } from './voice.ts';
+import { workBuddyAccountBalance } from '../workbuddy/account.ts';
 
 /**
  * 保存设置：单飞、先中止在途请求，失败即暂停，等下一次保存成功才恢复。
@@ -103,12 +104,26 @@ export function createStandaloneAi(
         })
       : () => {};
   const modelOf = (): string => store.current().model;
-  const accountReader = createCodexAccountReader(home);
+  const accountReader = dependencies.codexAccount ?? createCodexAccountReader(home);
   const readCodexBalance = async (): Promise<BalanceResult> => {
     const result = await accountReader.read();
     return runtime.disposed || store.current().protocol !== 'codex'
       ? { ok: false, provider: 'codex', reason: 'unsupported', message: 'Codex 账户连接已关闭或切换。' }
       : result;
+  };
+  const readWorkBuddyBalance = async (): Promise<BalanceResult> => {
+    try {
+      if (!runtime.workbuddy?.balance)
+        return { ok: false, provider: 'workbuddy', reason: 'unsupported', message: 'WorkBuddy 套餐查询组件暂不可用。' };
+      return workBuddyAccountBalance(await runtime.workbuddy.balance());
+    } catch (error) {
+      return {
+        ok: false,
+        provider: 'workbuddy',
+        reason: 'fetch-error',
+        message: error instanceof WorkBuddyFailure ? error.message : 'WorkBuddy 套餐查询失败，请检查登录和网络。',
+      };
+    }
   };
 
   return {
@@ -142,7 +157,16 @@ export function createStandaloneAi(
       store.current().protocol === 'codex'
         ? { provider: 'codex', apiKey: '', query: readCodexBalance }
         : store.current().protocol === 'workbuddy'
-          ? { provider: '', apiKey: '' }
+          ? {
+              provider: 'workbuddy',
+              apiKey: '',
+              query: async () => {
+                const result = await readWorkBuddyBalance();
+                return runtime.disposed || store.current().protocol !== 'workbuddy'
+                  ? { ok: false, provider: 'workbuddy', reason: 'unsupported', message: 'WorkBuddy 连接已关闭或切换。' }
+                  : result;
+              },
+            }
           : { provider: store.current().balanceProvider, apiKey: store.current().apiKey },
     deepseekKey: () => store.current().deepseekApiKey,
     async testConnection(input) {
@@ -210,19 +234,21 @@ export function createStandaloneAi(
         };
       }
     },
-    queryBalance: async () =>
-      runtime.disposed
-        ? { ok: false, provider: '', reason: 'unsupported' }
-        : store.current().protocol === 'codex'
-          ? readCodexBalance()
-          : store.current().protocol === 'workbuddy'
-            ? {
-                ok: false,
-                provider: 'workbuddy',
-                reason: 'unsupported',
-                message: 'WorkBuddy 当前接入不提供余额查询，请在 WorkBuddy 中查看额度。',
-              }
-            : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
+    queryBalance: async (input = {}) => {
+      const protocol = input.protocol ?? store.current().protocol;
+      if (runtime.disposed)
+        return { ok: false, provider: protocol, reason: 'unsupported', message: '账户连接已关闭。' };
+      if (protocol === 'codex') return accountReader.read();
+      if (protocol === 'workbuddy') return readWorkBuddyBalance();
+      if (protocol !== store.current().protocol)
+        return {
+          ok: false,
+          provider: protocol,
+          reason: 'unsupported',
+          message: '请先保存当前来源的连接，再查询对应余额。',
+        };
+      return queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey);
+    },
     dispose() {
       runtime.disposed = true;
       runtime.active?.abort();

@@ -24,7 +24,7 @@ export interface StandaloneSettingsService {
   /** 可选：拉取端点声明可用的模型。 */
   discoverModels?(input: ModelDiscoveryInput): Promise<ModelDiscoveryResult>;
   /** 可选：按已保存的服务商与密钥查询余额。 */
-  queryBalance?(): Promise<unknown>;
+  queryBalance?(input?: { protocol?: string }): Promise<unknown>;
 }
 
 /** 接口地址的校验：只允许干净的 HTTP 或 HTTPS 地址，凭据不放进 URL。 */
