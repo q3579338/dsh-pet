@@ -5,10 +5,13 @@
  * 卡片按 builder 数组返回，渲染时机由 ./pets 决定——这里不自己找容器。
  * @module dsh-pet/src/standalone/settings-page/script/globals
  */
+import { voicePreviewScript } from './voice-preview.ts';
 
 /** 生成全局卡片片段。 */
 export function globalsScript(): string {
-  return `
+  return (
+    voicePreviewScript() +
+    `
 function globalCards() {
   return [globalFlagsCard, voiceCard, fontCard, physicsCard, motionCard, modelCard, environmentCard, advancedCard];
 }
@@ -84,7 +87,8 @@ function voiceCard() {
   const speechProviders = state.speechProviders || [];
   return card('语音', '四类语音各一个开关，互不从属；音色、识别实现与音量共用。', [
     toggleRow('g-voice', '手动播报', '右键菜单与斜杠命令触发的碎碎念、对话回复念出来。', g.voiceEnabled, (value) => setGlobal('voiceEnabled', value)),
-    selectField('g-voice-name', '音色', g.voiceName, voices.map((voice) => ({ value: voice.id, label: voice.name + (voice.tag ? ' · ' + voice.tag : ''), group: voice.provider })), (value) => setGlobal('voiceName', value)),
+    selectField('g-voice-name', '音色', g.voiceName, voices.map((voice) => ({ value: voice.id, label: voice.name + (voice.tag ? ' · ' + voice.tag : ''), group: voice.provider })), (value) => { stopVoicePreview(); setGlobal('voiceName', value); }, 'Edge 原版音色与原创调音需联网合成；可先试听，保存后用于回复。'),
+    voicePreviewControls(),
     numberField('g-voice-volume', '音量（0–1）', g.voiceVolume, (value) => setGlobal('voiceVolume', clampNumber(value, 0, 1, 1)), { min: 0, max: 1, step: 0.05 }),
     toggleRow('g-voice-whisper', '周期碎碎念也念出来', '定时生成的那句碎碎念念出来。', g.voiceWhisperEnabled, (value) => setGlobal('voiceWhisperEnabled', value)),
     toggleRow('g-voice-todo', '待办提醒也念出来', '到点的待办提醒念出来。', g.voiceTodoEnabled, (value) => setGlobal('voiceTodoEnabled', value)),
@@ -204,5 +208,6 @@ async function syncFromDefault() {
     setStatus(status, error && error.message ? error.message : String(error), 'error');
   }
 }
-`;
+`
+  );
 }

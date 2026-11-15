@@ -103,6 +103,7 @@ function packNote() {
 function renderPetsPanel() {
   const host = byId('pet-cards');
   if (!host) return;
+  stopVoicePreview();
   host.textContent = '';
   const keys = Object.keys(state.pets);
   if (keys.length > 1) host.append(entryTabs(keys));

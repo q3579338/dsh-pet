@@ -170,6 +170,8 @@ input:disabled,select:disabled,textarea:disabled{background:var(--dsw-static-neu
   .scroll{padding:16px 16px 4px}
   .grid2,.grid3{grid-template-columns:1fr}
 }
+.voicePreviewAudio{display:block;width:100%;max-width:360px;height:36px;margin-top:8px}
+.voicePreviewAudio[hidden]{display:none}
 @media(prefers-reduced-motion:no-preference){.navCell,.btn,.tab{transition:background-color .1s ease}}
 ${PANEL_CSS}
 `;

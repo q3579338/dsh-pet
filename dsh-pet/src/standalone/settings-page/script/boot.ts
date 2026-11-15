@@ -56,6 +56,7 @@ function mountBalanceSelect() {
 }
 
 function selectTab(name) {
+  stopVoicePreview();
   for (const cell of document.querySelectorAll('[data-tab]')) {
     const active = cell.dataset.tab === name;
     cell.setAttribute('aria-selected', active ? 'true' : 'false');
@@ -140,6 +141,7 @@ async function loadAi() {
 }
 
 function boot() {
+  window.addEventListener('pagehide', stopVoicePreview);
   wireTabs();
   selectTab(new URLSearchParams(location.search).get('view') === 'config' ? 'config' : 'chat');
   // 刷新后地址栏里的令牌已被清掉，此时靠首次访问换来的 HttpOnly cookie 继续；

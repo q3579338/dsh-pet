@@ -26,6 +26,7 @@ import { ensureDeepseekAsrProvider } from './voice/builtin-deepseek-asr.ts';
 import { ensureDeepseekTtsProvider } from './voice/builtin-deepseek-tts.ts';
 import { ensureDshSpeechProvider } from './voice/builtin-dsh.ts';
 import { ensureEdgeProvider } from './voice/builtin-edge.ts';
+import { ensureCuteVoices } from './voice/builtin-cute.ts';
 import { ensureWindowsSpeech } from './voice/windows/providers.ts';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { createVoiceService } from './voice/speak.ts';
@@ -113,8 +114,10 @@ export function apply(ctx: any): void {
   // 内置语音实现与第三方走同一条注册路径：先登记，两个服务才解析得到各自的实现。
   // 识别那侧惰性依赖宿主服务，没装语音输入插件也能登记——调用时才回 unsupported。
   ensureEdgeProvider();
-  if (process.env.DSH_PET_CODEX === '1') ensureWindowsSpeech();
-  else ensureDshSpeechProvider({ speechToText: () => setup.optionalService('speechToText') });
+  if (process.env.DSH_PET_CODEX === '1') {
+    ensureWindowsSpeech();
+    ensureCuteVoices();
+  } else ensureDshSpeechProvider({ speechToText: () => setup.optionalService('speechToText') });
   // DeepSeek 官方语音：鉴权复用 DSH 的 DEEPSEEK_API_KEY，与余额那条路一致；
   // 独立模式依次借「语音专用 key」和「余额选 DeepSeek 时的那把」，最后才回落 DSH 凭据
   const resolveDeepseekKey = async (): Promise<string | undefined> => {

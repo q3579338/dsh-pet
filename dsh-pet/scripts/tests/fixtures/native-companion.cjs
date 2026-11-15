@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const Module = require('node:module');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const electron = require('electron');
 const { app, session } = electron;
@@ -48,6 +49,7 @@ const guard = setTimeout(() => {
 }, 60000);
 (async () => {
   try {
+    console.info('native-check: loading packaged app');
     await import(pathToFileURL(path.join(process.env.DSH_PET_NATIVE_COMPANION_ASAR, 'lib/app.js')).href);
     await app.whenReady();
     for (let i = 0; i < 100 && !RealWindow.getAllWindows().length; i++) await wait(100);
@@ -55,13 +57,47 @@ const guard = setTimeout(() => {
     if (!win) throw Error('No offscreen window');
     const runtime = JSON.parse(fs.readFileSync(path.join(runDir, 'home/dsh-pet/standalone-runtime.json')));
     const origin = 'http://127.0.0.1:' + runtime.port;
+    report.configuredVoice = JSON.parse(fs.readFileSync(path.join(runDir, 'home/dsh-pet/main-config.jsonc'))).voiceName;
+    assert.equal(report.configuredVoice, 'edge/zh-CN-XiaoyiNeural');
     const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
       method: 'POST',
       headers: { 'X-DSH-Pet-Token': runtime.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: '你好，今天的天气很好。', voice: 'windows/zh-CN' }),
     });
     assert.equal(sample.status, 200);
+    console.info('native-check: local recognition sample generated');
     fs.writeFileSync(path.join(runDir, 'sample.wav'), Buffer.from(await sample.arrayBuffer()));
+    const catalog = await (
+      await fetch(origin + '/dsh-pet-7340/voice/voices', {
+        headers: { 'X-DSH-Pet-Token': runtime.token },
+      })
+    ).json();
+    const cute = catalog.providers.find((provider) => provider.id === 'bigfish-cute');
+    assert.equal(cute?.voices.length, 4);
+    report.voicePreviews = [];
+    fs.mkdirSync(path.join(runDir, 'voice-previews'));
+    for (const voice of [{ id: 'edge/zh-CN-XiaoyiNeural', name: '晓伊（原版默认）' }, ...cute.voices]) {
+      console.info('native-check: synthesizing ' + voice.id);
+      const response = await fetch(origin + '/dsh-pet-7340/voice/speak', {
+        method: 'POST',
+        headers: { 'X-DSH-Pet-Token': runtime.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice: voice.id, text: '我来啦！今天也想陪着你，把小小的事情都变得开心一点。' }),
+      });
+      assert.equal(response.status, 200, 'Synthesis failed for ' + voice.id);
+      assert.match(response.headers.get('content-type'), /audio\/mpeg/);
+      const bytes = Buffer.from(await response.arrayBuffer());
+      assert.ok(bytes.length > 1000);
+      const file = voice.id.replace('/', '-') + '.mp3';
+      fs.writeFileSync(path.join(runDir, 'voice-previews', file), bytes);
+      report.voicePreviews.push({
+        id: voice.id,
+        name: voice.name,
+        bytes: bytes.length,
+        file,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+      });
+      console.info('native-check: audio generated ' + voice.id);
+    }
     const javascript = (source) => win.webContents.executeJavaScript(source);
     win.webContents.on('console-message', (_event, level, text) => {
       if (level >= 2) report.errors.push(text.slice(0, 300));
@@ -210,8 +246,58 @@ const guard = setTimeout(() => {
     }
     report.nativeQuotaRead = await chatJs("document.querySelector('#balance-result')?.dataset.ok === 'true'");
     assert.equal(report.nativeQuotaRead, true);
+    await chatJs(
+      "(()=>{window.__previewPlayed=0;window.__previewPlayError='';const original=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){const audio=this.tagName==='AUDIO';return original.call(this).then(()=>{if(audio)window.__previewPlayed++;}).catch(error=>{window.__previewPlayError=error.name;throw error;});};})()",
+    );
+    await chatJs("document.querySelector('#g-voice-name button').click()");
+    const voiceChoices = await chatJs("[...document.querySelectorAll('[role=option]')].map(item=>item.textContent)");
+    for (const name of ['晓伊', '星铃', '月棉', '糖芽', '团子'])
+      assert.ok(voiceChoices.some((choice) => choice.includes(name)));
+    const playedBeforePreview = await chatJs('window.__previewPlayed');
+    await chatJs(
+      "[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('糖芽')).click();document.querySelector('#g-voice-preview').scrollIntoView({block:'center'});document.querySelector('#g-voice-preview').click()",
+    );
+    for (let i = 0; i < 150; i++) {
+      if (await chatJs("document.querySelector('#g-voice-preview-status').dataset.ok === 'true'")) break;
+      await wait(100);
+    }
+    report.settingsPreview = {
+      choices: voiceChoices,
+      played: (await chatJs('window.__previewPlayed')) > playedBeforePreview,
+      player: await chatJs(
+        "(()=>{const audio=document.querySelector('#g-voice-preview-audio');return {status:document.querySelector('#g-voice-preview-status').textContent,hidden:audio.hidden,readyState:audio.readyState,error:audio.error?.message,playError:window.__previewPlayError};})()",
+      ),
+      draftOnly:
+        JSON.parse(fs.readFileSync(path.join(runDir, 'home/dsh-pet/main-config.jsonc'))).voiceName ===
+        report.configuredVoice,
+    };
+    if (!report.settingsPreview.played) {
+      await chatJs("document.querySelector('#g-voice-preview-audio').play()");
+      report.settingsPreview.played = (await chatJs('window.__previewPlayed')) > playedBeforePreview;
+    }
+    assert.equal(report.settingsPreview.played, true);
+    fs.writeFileSync(path.join(runDir, 'voice-preview-offscreen.png'), (await chat.webContents.capturePage()).toPNG());
+    await chatJs(
+      "document.querySelector('#g-voice-name button').click();[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('晓伊')).click()",
+    );
+    report.settingsPreview.stoppedOnChange = await chatJs(
+      "document.querySelector('#g-voice-preview-audio').paused && !document.querySelector('#g-voice-preview-audio').hasAttribute('src')",
+    );
+    await chatJs("document.querySelector('#pet-save').click()");
+    for (let i = 0; i < 80; i++) {
+      if (
+        await chatJs(
+          "document.querySelector('#pet-status').dataset.ok === 'true' && document.querySelector('#dirty').hidden",
+        )
+      )
+        break;
+      await wait(100);
+    }
+    report.settingsPreview.savedOriginal =
+      JSON.parse(fs.readFileSync(path.join(runDir, 'home/dsh-pet/main-config.jsonc'))).voiceName ===
+      'edge/zh-CN-XiaoyiNeural';
+    assert.equal(report.settingsPreview.savedOriginal, true);
     if (RealWindow.getAllWindows().some((item) => item.isVisible())) throw Error('A test window became visible');
-    fs.writeFileSync(path.join(runDir, 'offscreen.png'), (await win.webContents.capturePage()).toPNG());
     report.ok = true;
   } catch (error) {
     report.ok = false;
@@ -220,6 +306,8 @@ const guard = setTimeout(() => {
     clearTimeout(guard);
     fs.writeFileSync(path.join(runDir, 'result.json'), JSON.stringify(report, null, 2));
     process.exitCode = report.ok ? 0 : 1;
+    const forcedExit = setTimeout(() => app.exit(report.ok ? 0 : 1), 1500);
+    forcedExit.unref();
     app.quit();
   }
 })();

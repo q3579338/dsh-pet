@@ -36,18 +36,21 @@ test('Codex first launch preserves the original character and existing user choi
     assert.deepEqual(updated.pets, JSON.parse(chosen).pets);
     if (process.platform === 'win32') {
       assert.equal(updated.speechProvider, 'windows');
-      assert.equal(updated.voiceName, 'windows/zh-CN');
+      assert.equal(updated.voiceName, 'edge/zh-CN-XiaoyiNeural');
       assert.equal(updated.voiceEnabled, true);
     }
-    const custom = {
-      ...updated,
-      voiceEnabled: false,
-      voiceName: 'edge/zh-CN-XiaoxiaoNeural',
-      speechProvider: 'custom',
-    };
-    writeFileSync(paths.userFile, JSON.stringify(custom));
-    seedCodexProfile(paths);
-    assert.deepEqual(JSON.parse(readFileSync(paths.userFile, 'utf8')), custom);
+    for (const voiceName of [
+      'edge/zh-CN-XiaoyiNeural',
+      'edge/zh-CN-XiaoxiaoNeural',
+      'windows/zh-CN',
+      'bigfish-cute/sugarbud-v1',
+    ]) {
+      const custom = { ...updated, voiceEnabled: false, voiceName, speechProvider: 'custom' };
+      writeFileSync(paths.userFile, JSON.stringify(custom));
+      seedCodexProfile(paths);
+      seedCodexProfile(paths);
+      assert.deepEqual(JSON.parse(readFileSync(paths.userFile, 'utf8')), custom);
+    }
   } finally {
     if (previous === undefined) delete process.env.DSH_PET_CODEX;
     else process.env.DSH_PET_CODEX = previous;

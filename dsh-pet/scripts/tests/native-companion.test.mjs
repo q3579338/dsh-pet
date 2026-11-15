@@ -25,7 +25,7 @@ test(
         pets: [{ id: 'main', display: 'desktop', whisperEnabled: false, balanceEnabled: false }],
         trayEnabled: false,
         voiceEnabled: true,
-        voiceName: 'windows/zh-CN',
+        voiceName: 'edge/zh-CN-XiaoyiNeural',
         speechProvider: 'windows',
         clickSoundEnabled: false,
       }),
@@ -76,16 +76,34 @@ test(
       assert.equal(report.nativeQuotaRead, true);
       assert.match(report.microphoneDeniedFeedback, /麦克风未获授权/);
       assert.equal(report.microphoneStability.length, 6);
+      assert.equal(report.configuredVoice, 'edge/zh-CN-XiaoyiNeural');
+      assert.equal(report.voicePreviews.length, 5);
+      assert.equal(new Set(report.voicePreviews.map((preview) => preview.sha256)).size, 5);
+      assert.equal(report.settingsPreview.played, true);
+      assert.equal(report.settingsPreview.draftOnly, true);
+      assert.equal(report.settingsPreview.stoppedOnChange, true);
+      assert.equal(report.settingsPreview.savedOriginal, true);
       assert.ok(!report.responses.some((item) => item.status === 401 || item.status === 403));
+    } finally {
+      if (child.exitCode === null) child.kill();
       const evidence = process.env.DSH_PET_NATIVE_COMPANION_EVIDENCE;
       if (evidence) {
         await mkdir(resolve(evidence), { recursive: true });
-        await writeFile(join(resolve(evidence), 'result.json'), JSON.stringify(report, null, 2));
         await writeFile(join(resolve(evidence), 'native.log'), output);
-        await writeFile(join(resolve(evidence), 'chat-offscreen.png'), await readFile(join(run, 'chat-offscreen.png')));
+        for (const file of ['result.json', 'chat-offscreen.png', 'voice-preview-offscreen.png']) {
+          const bytes = await readFile(join(run, file)).catch(() => null);
+          if (bytes) await writeFile(join(resolve(evidence), file), bytes);
+        }
+        const result = await readFile(join(run, 'result.json'), 'utf8')
+          .then(JSON.parse)
+          .catch(() => null);
+        await mkdir(join(resolve(evidence), 'voice-previews'), { recursive: true });
+        for (const preview of result?.voicePreviews ?? [])
+          await writeFile(
+            join(resolve(evidence), 'voice-previews', preview.file),
+            await readFile(join(run, 'voice-previews', preview.file)),
+          );
       }
-    } finally {
-      if (child.exitCode === null) child.kill();
       assert.ok(resolve(run).startsWith(resolve(tmpdir()) + sep));
       await rm(run, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
     }
