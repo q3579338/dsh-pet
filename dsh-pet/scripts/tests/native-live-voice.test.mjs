@@ -54,7 +54,7 @@ test(
         const timer = setTimeout(() => {
           child.kill();
           reject(Error('即时语音离屏验收超时'));
-        }, 80000);
+        }, 160000);
         child.once('error', (error) => {
           clearTimeout(timer);
           reject(error);
@@ -77,13 +77,23 @@ test(
       assert.equal(report.cancelCloseKeptWindow, true);
       assert.equal(report.discardClosed, true);
       assert.ok(report.live.peak > 0.001);
+      assert.equal(report.bargeInStoppedOld, true);
+      for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
+        assert.ok(report.custom.played.includes('bigfish-cute/' + id));
     } finally {
       if (child.exitCode === null) child.kill();
       if (env.DSH_PET_NATIVE_LIVE_EVIDENCE) {
         const evidence = resolve(env.DSH_PET_NATIVE_LIVE_EVIDENCE);
         await mkdir(evidence, { recursive: true });
         await writeFile(join(evidence, 'native-live.log'), output);
-        for (const file of ['result.json', 'live-offscreen.png', 'native-sweet-voice.wav']) {
+        for (const file of [
+          'result.json',
+          'live-offscreen.png',
+          'native-sweet-voice.wav',
+          'starbell-v1.mp3',
+          'sugarbud-v1.mp3',
+          'dango-v1.mp3',
+        ]) {
           const data = await readFile(join(run, file)).catch(() => null);
           if (data) await writeFile(join(evidence, file), data);
         }

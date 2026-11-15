@@ -42,7 +42,7 @@ export type SpeakResult =
 /** 语音服务：路由层只依赖这两个方法。 */
 export interface VoiceService {
   /** 合成一段文本；同一输入命中缓存时不再调用实现。 */
-  speak(raw: unknown): Promise<SpeakResult>;
+  speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult>;
   /** 当前音色目录（由注册表提供）。 */
   list(): VoiceCatalog;
 }
@@ -109,17 +109,30 @@ export function isQueueStale(queuedMs: number, nowMs: number, waitMs: number = S
 }
 
 /** 给一个 Promise 套超时；超时 reject，原 Promise 不被取消（实现自己该处理放弃）。 */
-function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
+function withTimeout<T>(task: Promise<T>, timeoutMs: number, signal?: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('voice provider timed out')), timeoutMs);
+    const cleanup = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    };
+    const abort = (): void => {
+      cleanup();
+      reject(new Error('voice synthesis cancelled'));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('voice provider timed out'));
+    }, timeoutMs);
     timer.unref?.();
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
     task.then(
       (value) => {
-        clearTimeout(timer);
+        cleanup();
         resolve(value);
       },
       (error) => {
-        clearTimeout(timer);
+        cleanup();
         reject(error);
       },
     );
@@ -155,7 +168,28 @@ export function createVoiceService(options: {
   staleWaitMs?: number;
 }): VoiceService {
   const { userRoot, log, configuredVoice } = options;
-  const inFlight = new Map<string, Promise<SpeakResult>>();
+  type Job = { promise: Promise<SpeakResult>; abort: AbortController; users: number; settled: boolean };
+  const inFlight = new Map<string, Job>();
+  const cancelled = (): SpeakResult => ({ ok: false, reason: 'generate-error', message: 'voice synthesis cancelled' });
+  const joinJob = (job: Job, signal?: AbortSignal): Promise<SpeakResult> =>
+    new Promise((resolve) => {
+      job.users++;
+      let done = false;
+      const finish = (result: SpeakResult): void => {
+        if (done) return;
+        done = true;
+        signal?.removeEventListener('abort', abort);
+        job.users--;
+        resolve(result);
+      };
+      const abort = (): void => {
+        finish(cancelled());
+        if (!job.users && !job.settled) job.abort.abort();
+      };
+      signal?.addEventListener('abort', abort, { once: true });
+      if (signal?.aborted) abort();
+      void job.promise.then(finish);
+    });
   const staleWaitMs = options.staleWaitMs ?? STALE_WAIT_MS;
   /** 已占用的队列名额（含正在跑的那个）。 */
   let queueUsed = 0;
@@ -211,7 +245,7 @@ export function createVoiceService(options: {
   }
 
   /** 排队、合成、原子落盘；失败已归一成结论，不向外抛。 */
-  async function runSynthesis(call: Extract<PreparedCall, { ok: true }>): Promise<SpeakResult> {
+  async function runSynthesis(call: Extract<PreparedCall, { ok: true }>, signal: AbortSignal): Promise<SpeakResult> {
     const { text, rate, resolved, target } = call;
     const { provider, voice } = resolved;
     const queue = { dropped: false };
@@ -219,6 +253,7 @@ export function createVoiceService(options: {
     const startedMs = queuedMs;
     try {
       await enqueue(async () => {
+        if (signal.aborted) return;
         if (isQueueStale(queuedMs, Date.now(), staleWaitMs)) {
           queue.dropped = true;
           return;
@@ -227,9 +262,16 @@ export function createVoiceService(options: {
         const timeoutMs = provider.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS;
         // signal 让实现能提前收手；withTimeout 兜住「它根本不理这个 signal」的情况
         const bytes = await withTimeout(
-          provider.synthesize({ text, voice: voice.id, rate, signal: AbortSignal.timeout(timeoutMs) }),
+          provider.synthesize({
+            text,
+            voice: voice.id,
+            rate,
+            signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+          }),
           timeoutMs,
+          signal,
         );
+        if (signal.aborted) return;
         // 空字节按失败处理：0 字节文件会被缓存命中逻辑反复重合成，白烧上游
         if (bytes.length === 0) throw new Error('voice provider returned empty audio');
         await writeAtomically(target, bytes);
@@ -237,6 +279,7 @@ export function createVoiceService(options: {
         await pruneCache(dir);
       });
     } catch (error) {
+      if (signal.aborted) return cancelled();
       // 上游细节（含 URL、状态码）不外泄，只留在日志里
       log?.warn?.(
         `[dsh-pet] voice speak: failed chars=${text.length} voice=${resolved.limitedId} ` +
@@ -244,6 +287,7 @@ export function createVoiceService(options: {
       );
       return { ok: false, reason: 'generate-error', message: 'voice synthesis failed' };
     }
+    if (signal.aborted) return cancelled();
     if (queue.dropped) {
       log?.warn?.(
         `[dsh-pet] voice speak: dropped chars=${text.length} voice=${resolved.limitedId} ` +
@@ -258,17 +302,19 @@ export function createVoiceService(options: {
     return { ok: true, file: target, contentType: call.contentType };
   }
 
-  async function speak(raw: unknown): Promise<SpeakResult> {
+  async function speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult> {
+    if (signal?.aborted) return cancelled();
     const call = prepareCall(raw);
     if (!call.ok) return call.result;
 
     const cached = await findCached(call.target);
+    if (signal?.aborted) return cancelled();
     if (cached) {
       log?.info?.(`[dsh-pet] voice speak: cache=hit chars=${call.text.length} voice=${call.resolved.limitedId}`);
       return { ok: true, file: cached, contentType: call.contentType };
     }
     const existing = inFlight.get(call.target);
-    if (existing) return existing;
+    if (existing && !existing.abort.signal.aborted) return joinJob(existing, signal);
     if (queueUsed >= MAX_QUEUE) {
       log?.warn?.(
         `[dsh-pet] voice speak: queue full (max ${MAX_QUEUE}) chars=${call.text.length} ` +
@@ -276,13 +322,15 @@ export function createVoiceService(options: {
       );
       return { ok: false, reason: 'voice-busy', message: 'voice queue is full, retry later' };
     }
-    const pending = runSynthesis(call);
-    inFlight.set(call.target, pending);
-    try {
-      return await pending;
-    } finally {
-      if (inFlight.get(call.target) === pending) inFlight.delete(call.target);
-    }
+    const abort = new AbortController();
+    const job: Job = { abort, users: 0, settled: false, promise: Promise.resolve(cancelled()) };
+    job.promise = runSynthesis(call, abort.signal).then((result) => {
+      job.settled = true;
+      if (inFlight.get(call.target) === job) inFlight.delete(call.target);
+      return result;
+    });
+    inFlight.set(call.target, job);
+    return joinJob(job, signal);
   }
 
   return { list: listCatalog, speak };

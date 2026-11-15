@@ -10,7 +10,7 @@ import type { Key } from './locales/index.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState, ConfirmKind, DraftKeyEvent } from './types.ts';
 import type { LiveVoiceView } from './live-voice.ts';
-import { LIVE_VOICE_STYLES } from '../../shared/live-voice-style.ts';
+import { LIVE_VOICE_STYLES, liveVoiceStyle } from '../../shared/live-voice-style.ts';
 
 /**
  * 已删宠物残留历史的提示条：显示数量并给一个「清理」。
@@ -307,10 +307,10 @@ export function composerNode(
             ? h('label', {
                 className: 'pet-chat-live-style',
                 children: [
-                  h('span', { children: '语音风格' }),
+                  h('span', { children: '聊天音色' }),
                   h('select', {
-                    'aria-label': '即时语音风格',
-                    title: '连接前选择；本次窗口内保留。保持原生即时语音，调整语调、节奏和语气。',
+                    'aria-label': '语音聊天音色',
+                    title: '连接前选择实际朗读音色；本次窗口内保留。Codex 原声直接播放，其他音色逐句合成。',
                     value: live.styleId,
                     disabled: live.active,
                     onChange: (event: { target: { value: string } }) => live.chooseStyle(event.target.value),
@@ -328,7 +328,15 @@ export function composerNode(
                 onClick: live.toggle,
                 disabled: !live.active && (state.busy || !state.petId),
                 'aria-pressed': String(live.active),
-                children: live.phase === 'connecting' ? '取消连接' : live.active ? '结束语音' : '即时语音',
+                children: live.phase === 'connecting' ? '取消连接' : live.active ? '结束语音' : '语音聊天',
+              })
+            : null,
+          live?.active && liveVoiceStyle(live.styleId)?.synthesisVoice
+            ? h('button', {
+                type: 'button',
+                className: 'pet-chat-tool pet-chat-live-interrupt',
+                onClick: live.interrupt,
+                children: '打断',
               })
             : null,
           speechInput
@@ -365,8 +373,9 @@ export function composerNode(
               live.active
                 ? h('div', {
                     className: 'pet-chat-live-note',
-                    children:
-                      '麦克风正在使用，语音发送至 Codex/OpenAI。所选风格调整原生语音的语调、节奏和语气，普通聊天音色单独保留。本次字幕不写入普通聊天记忆。',
+                    children: liveVoiceStyle(live.styleId)?.synthesisVoice
+                      ? '录音发送至 Codex/OpenAI，回复文字交给所选音色逐句朗读。字幕会先出现。本次字幕不写入普通聊天记忆。'
+                      : '麦克风正在使用，语音发送至 Codex/OpenAI。本次直接播放 Codex 原声，字幕不写入普通聊天记忆。',
                   })
                 : null,
               live.user ? h('div', { className: 'pet-chat-live-user', children: '你：' + live.user }) : null,

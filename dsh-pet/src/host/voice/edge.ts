@@ -37,7 +37,7 @@ export class VoiceSynthError extends Error {
  * @returns mp3 字节；落盘由调用方负责。
  * @throws {VoiceSynthError} 依赖缺失、上游失败或超时时。
  */
-export async function synthesize({ signal, text, voice, rate, pitch }: EdgeSynthInput): Promise<Uint8Array> {
+async function synthesizeOnce({ signal, text, voice, rate, pitch }: EdgeSynthInput): Promise<Uint8Array> {
   try {
     // 按需加载：包缺失时这里抛 MODULE_NOT_FOUND，由下面统一归成 VoiceSynthError。
     // CJS 包经 dynamic import 后可能只露 default，两种形状都认。
@@ -55,4 +55,43 @@ export async function synthesize({ signal, text, voice, rate, pitch }: EdgeSynth
   } catch (error) {
     throw new VoiceSynthError(error instanceof Error ? error.message : String(error));
   }
+}
+
+/** 短暂限流只做两次有间隔的重试；取消立即结束，不重试权限或其他错误。 */
+export async function retryVoiceRateLimit<T>(
+  run: () => Promise<T>,
+  signal?: AbortSignal,
+  wait: (ms: number, signal?: AbortSignal) => Promise<void> = waitForVoiceRetry,
+): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    if (signal?.aborted) throw new VoiceSynthError('语音已停止');
+    try {
+      return await run();
+    } catch (error) {
+      if (signal?.aborted || attempt >= 2 || !(error instanceof Error) || !/\b429\b/u.test(error.message)) throw error;
+      await wait(attempt === 0 ? 1000 : 2500, signal);
+    }
+  }
+}
+
+/** 退避计时器随请求取消释放。 */
+function waitForVoiceRetry(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const abort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(new VoiceSynthError('语音已停止'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+  });
+}
+
+/** 沿用原版音色参数，正常请求没有额外等待；仅临时 429 退避重试。 */
+export async function synthesize(input: EdgeSynthInput): Promise<Uint8Array> {
+  return retryVoiceRateLimit(() => synthesizeOnce(input), input.signal);
 }

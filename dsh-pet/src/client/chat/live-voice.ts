@@ -4,6 +4,9 @@ import { setLiveVoiceActive } from '../../shared/voice.ts';
 import { DEFAULT_LIVE_VOICE_STYLE, liveVoiceStyle, type LiveVoiceStyleId } from '../../shared/live-voice-style.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
+import { createCustomSpeechOutput, type CustomSpeechQueue } from './custom-speech.ts';
+import { watchMicrophoneSpeech } from './microphone-activity.ts';
+import { assistantTranscriptDelta } from './live-transcript.ts';
 
 /** 对话区只显示本次最近一轮字幕，不写入普通聊天存档。 */
 export interface LiveVoiceView {
@@ -15,6 +18,7 @@ export interface LiveVoiceView {
   readonly toggle: () => void;
   readonly styleId: LiveVoiceStyleId;
   readonly chooseStyle: (id: string) => void;
+  readonly interrupt: () => void;
 }
 
 /** 连接的可见状态。 */
@@ -46,6 +50,7 @@ export function createLiveVoiceControl(options: {
 }): {
   toggle(): void;
   dispose(): void;
+  interrupt(): void;
 } {
   type Call = {
     abort: AbortController;
@@ -56,6 +61,12 @@ export function createLiveVoiceControl(options: {
     heartbeat?: ReturnType<typeof setInterval>;
     timeout?: ReturnType<typeof setTimeout>;
     disconnect?: ReturnType<typeof setTimeout>;
+    speech?: CustomSpeechQueue;
+    stopMicWatch?: () => void;
+    firstOutputAt?: number;
+    reportedPlayback?: boolean;
+    outputIds: Set<string>;
+    assistantTurnId?: string;
   };
   let call: Call | undefined;
   let state: LiveData = { ...EMPTY };
@@ -80,6 +91,8 @@ export function createLiveVoiceControl(options: {
       clearTimeout(old.timeout);
       clearTimeout(old.disconnect);
       old.abort.abort();
+      old.speech?.dispose();
+      old.stopMicWatch?.();
       old.stream?.getTracks().forEach((track) => track.stop());
       old.peer.close();
       old.audio.pause();
@@ -104,10 +117,11 @@ export function createLiveVoiceControl(options: {
       abort: new AbortController(),
       peer: new RTCPeerConnection(),
       audio: document.createElement('audio'),
+      outputIds: new Set(),
     };
     call = current;
     setLiveVoiceActive(true);
-    paint({ ...EMPTY, active: true, phase: 'connecting', message: '正在连接 Codex，即时语音可随时取消…' });
+    paint({ ...EMPTY, active: true, phase: 'connecting', message: '正在连接 Codex，语音聊天可随时取消…' });
     current.timeout = setTimeout(() => {
       if (call === current) stop('即时语音连接超时，请重试。');
     }, 35000);
@@ -134,7 +148,48 @@ export function createLiveVoiceControl(options: {
       }
       const main = record(record(await config).main);
       const volume = typeof main.voiceVolume === 'number' ? main.voiceVolume : 1;
-      current.audio.volume = Math.min(1, Math.max(0, volume));
+      const selection = liveVoiceStyle(options.style?.() ?? DEFAULT_LIVE_VOICE_STYLE)!;
+      const playbackVolume = Math.min(1, Math.max(0, volume));
+      current.audio.volume = selection.synthesisVoice ? 0 : playbackVolume;
+      current.audio.dataset.petNativeVoice = 'true';
+      const connectedMessage = selection.synthesisVoice
+        ? `正在语音聊天，回复由${selection.name}逐句朗读。`
+        : '正在即时语音，可以直接说话，也可以打断回复。';
+      if (selection.synthesisVoice) {
+        current.speech = createCustomSpeechOutput({
+          voice: selection.synthesisVoice,
+          volume: playbackVolume,
+          failure: () => {
+            if (relevant()) stop(selection.name + '暂时无法合成语音，请稍后重试或选择其他音色。');
+          },
+          phase: (phase) => {
+            if (!relevant()) return;
+            paint({
+              message:
+                phase === 'preparing'
+                  ? selection.name + '正在准备声音…'
+                  : phase === 'playing'
+                    ? selection.name + '正在说话，可以直接开口打断。'
+                    : connectedMessage,
+            });
+            if (phase === 'playing' && !current.reportedPlayback) {
+              current.reportedPlayback = true;
+              document.dispatchEvent(
+                new CustomEvent('pet-custom-voice-play', {
+                  detail: {
+                    voice: selection.synthesisVoice,
+                    fromTextMs: Date.now() - (current.firstOutputAt ?? Date.now()),
+                  },
+                }),
+              );
+            }
+          },
+        });
+        current.speech.begin();
+        current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
+          if (relevant() && current.speech?.busy()) current.speech.interrupt();
+        });
+      }
       current.audio.hidden = true;
       document.body.append(current.audio);
       const channel = current.peer.createDataChannel('oai-events');
@@ -145,10 +200,40 @@ export function createLiveVoiceControl(options: {
           const item = record(value.item);
           const turn = record(value.turn);
           if (value.type === 'input_transcript.added') paint({ user: text(item.text) });
-          if (value.type === 'output_transcript.added') paint({ pet: (state.pet + text(item.text)).slice(-6000) });
-          if (value.type === 'turn.created' && turn.role === 'assistant') paint({ pet: '' });
-          if (value.type === 'turn.done' && turn.role === 'assistant' && text(turn.transcript))
-            paint({ pet: text(turn.transcript) });
+          if (value.type === 'output_transcript.added') {
+            if (typeof item.id === 'string') {
+              if (current.outputIds.has(item.id)) return;
+              current.outputIds.add(item.id);
+            }
+            const part = text(item.text);
+            if (part && !current.firstOutputAt) current.firstOutputAt = Date.now();
+            paint({ pet: (state.pet + part).slice(-6000) });
+            current.speech?.append(part);
+          }
+          if (value.type === 'turn.created' && turn.role === 'assistant') {
+            current.assistantTurnId = typeof turn.id === 'string' ? turn.id : undefined;
+            paint({ pet: '' });
+            current.outputIds.clear();
+            current.firstOutputAt = undefined;
+            current.reportedPlayback = false;
+            current.speech?.begin();
+          }
+          const delta = assistantTranscriptDelta(value, current.assistantTurnId);
+          if (delta) {
+            if (!current.firstOutputAt) current.firstOutputAt = Date.now();
+            paint({ pet: (state.pet + delta).slice(-6000) });
+            current.speech?.append(delta);
+          }
+          if (
+            value.type === 'turn.done' &&
+            turn.role === 'assistant' &&
+            (!current.assistantTurnId || turn.id === current.assistantTurnId)
+          ) {
+            const full = text(turn.transcript);
+            if (full) paint({ pet: full });
+            current.speech?.finish(full);
+          }
+          if (value.type === 'input_audio_buffer.speech_started') current.speech?.interrupt();
           if (value.type === 'error') stop('Codex 即时语音已中断，请重试。');
         } catch {
           /* 忽略无法识别的控制事件，不显示内部报错或音频载荷。 */
@@ -168,7 +253,7 @@ export function createLiveVoiceControl(options: {
           clearTimeout(current.disconnect);
           if (current.sessionId) {
             clearTimeout(current.timeout);
-            paint({ phase: 'live', message: '正在即时语音，可以直接说话，也可以打断回复。' });
+            paint({ phase: 'live', message: connectedMessage });
           }
         } else if (connection === 'failed' || connection === 'closed') stop('语音连接已断开，请重试。');
         else if (connection === 'disconnected')
@@ -214,7 +299,7 @@ export function createLiveVoiceControl(options: {
       }, 15000);
       if (current.peer.connectionState === 'connected') {
         clearTimeout(current.timeout);
-        paint({ phase: 'live', message: '正在即时语音，可以直接说话，也可以打断回复。' });
+        paint({ phase: 'live', message: connectedMessage });
       }
     } catch (error) {
       if (!relevant()) return;
@@ -241,6 +326,10 @@ export function createLiveVoiceControl(options: {
     toggle() {
       if (call) stop();
       else void start();
+    },
+    interrupt() {
+      call?.speech?.interrupt();
+      if (call) paint({ message: '已停止这一句，麦克风仍在接收，可以继续说话。' });
     },
     dispose() {
       disposed = true;
@@ -289,6 +378,7 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
           if (!data.active && liveVoiceStyle(id)) setStyle(id as LiveVoiceStyleId);
         },
         toggle: () => control.current?.toggle(),
+        interrupt: () => control.current?.interrupt(),
       }
     : undefined;
 }

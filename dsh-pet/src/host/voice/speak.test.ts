@@ -346,6 +346,63 @@ test('isQueueStale —— 排队久了就丢弃', () => {
   assert.equal(isQueueStale(1_000, 1_000 + 28_001), true, '超过上限就该丢');
 });
 
+test('单个订阅者取消不打断共享合成，所有订阅者取消才释放旧任务', async () => {
+  let release: () => void = () => {};
+  let calls = 0;
+  let upstream: AbortSignal | undefined;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  await withService(
+    async (voice) => {
+      const controller = new AbortController();
+      const first = voice.speak({ text: '共享句子' }, controller.signal);
+      const second = voice.speak({ text: '共享句子' });
+      await waitFor(() => calls === 1);
+      controller.abort();
+      assert.equal((await first).ok, false);
+      assert.equal(upstream?.aborted, false);
+      release();
+      assert.equal((await second).ok, true);
+      assert.equal(calls, 1);
+    },
+    {
+      synthesize: async ({ signal }) => {
+        calls++;
+        upstream = signal;
+        await gate;
+        return new Uint8Array([1]);
+      },
+    },
+  );
+});
+
+test('全部请求取消后，即使旧实现忽略 signal，新的语音也不会被旧合成永久挡住', async () => {
+  let calls = 0;
+  let upstream: AbortSignal | undefined;
+  await withService(
+    async (voice) => {
+      const controller = new AbortController();
+      const old = voice.speak({ text: '旧回复' }, controller.signal);
+      await waitFor(() => calls === 1);
+      controller.abort();
+      assert.equal((await old).ok, false);
+      assert.equal(upstream?.aborted, true);
+      assert.equal((await voice.speak({ text: '新回复' })).ok, true);
+    },
+    {
+      synthesize: async ({ text, signal }) => {
+        calls++;
+        if (text === '旧回复') {
+          upstream = signal;
+          await new Promise(() => {});
+        }
+        return new Uint8Array([1]);
+      },
+    },
+  );
+});
+
 test('排队等到客户端早已放弃：直接丢弃，不再白合成一次', async () => {
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => {

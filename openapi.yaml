@@ -2462,9 +2462,9 @@ paths:
                 sdp: { type: string, maxLength: 65536 }
                 styleId:
                   type: string
-                  enum: [starbell, moon, sugarbud, natural]
+                  enum: [starbell, moon, sugarbud, dango, natural]
                   default: starbell
-                  description: 原生语调、节奏与语气风格，连接前选择；不增加文字转语音步骤
+                  description: 聊天发声音色；星铃、月棉、糖芽、团子使用对应在线调音合成，natural 直接播放 Codex 原声
       responses:
         "200":
           description: 成功返回 ok、sessionId、answerSdp；失败返回 ok:false 和安全的 message

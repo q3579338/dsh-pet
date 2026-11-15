@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DEFAULT_LIVE_VOICE_STYLE, LIVE_VOICE_STYLES, liveVoiceStyle } from './live-voice-style.ts';
 
-test('原生风格只调整语气，自然原声不附加声音指令', () => {
+test('聊天音色对应实际合成实现，自然原声不经过独立合成', () => {
   assert.ok(liveVoiceStyle(DEFAULT_LIVE_VOICE_STYLE)?.instructions.includes('轻盈'));
   assert.ok(liveVoiceStyle('moon')?.instructions.includes('柔和'));
   assert.equal(liveVoiceStyle('natural')?.instructions, '');
+  assert.equal(liveVoiceStyle('starbell')?.synthesisVoice, 'bigfish-cute/starbell-v1');
+  assert.equal(liveVoiceStyle('sugarbud')?.synthesisVoice, 'bigfish-cute/sugarbud-v1');
+  assert.equal(liveVoiceStyle('dango')?.synthesisVoice, 'bigfish-cute/dango-v1');
+  assert.equal(liveVoiceStyle('natural')?.synthesisVoice, undefined);
   assert.equal(liveVoiceStyle('unknown'), undefined);
   assert.equal(new Set(LIVE_VOICE_STYLES.map((style) => style.id)).size, LIVE_VOICE_STYLES.length);
   for (const style of LIVE_VOICE_STYLES) {
