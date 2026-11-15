@@ -24,6 +24,7 @@ type FakeElement = {
   append: (...kids: unknown[]) => void;
   setAttribute: () => void;
   reportValidity: () => boolean;
+  closest: () => FakeElement;
   getBoundingClientRect: () => {
     left: number;
     top: number;
@@ -104,6 +105,9 @@ async function setupPage(search = ''): Promise<Page> {
         },
         setAttribute() {},
         reportValidity: () => true,
+        closest() {
+          return this;
+        },
         getBoundingClientRect: () => ({ left: 0, top: 0, right: 200, bottom: 36, width: 200, height: 36 }),
       });
     return elements.get(id)!;
@@ -390,4 +394,38 @@ test('拉取模型：用表单草稿请求端点，选中后写回输入框并�
   menu.children[0].listeners.click();
   assert.equal(page.element('model').value, 'm-one');
   assert.equal(page.element('dirty').hidden, false);
+});
+
+test('WorkBuddy 模型来源可选、凭据字段隐藏，切回 Codex 保留本窗口选择的模型', async () => {
+  const page = await setupPage();
+  const select = (name: string) => {
+    const root = page.element('protocol-host').children[0] as FakeNode;
+    root.firstElementChild!.listeners.click();
+    const menus = page.body.children.filter((node) => node.className === 'selectMenu' && node.isConnected);
+    const option = menus[menus.length - 1].children.find((node) => node.textContent === name);
+    assert.ok(option);
+    option.listeners.click();
+  };
+  select('本机 Codex（沿用已有登录）');
+  page.element('model').value = 'gpt-6-luna';
+  select('国内版 WorkBuddy');
+  assert.equal(page.element('model').value, 'deepseek-v4-flash');
+  assert.equal(page.element('workbuddy-note').hidden, false);
+  assert.equal(page.element('apiKey').hidden, true);
+  assert.equal(page.element('baseUrl').hidden, true);
+  assert.equal(page.element('balance-btn').hidden, true);
+  assert.match(page.element('balance-provider-note').textContent, /WorkBuddy/u);
+  page.element('model').value = 'glm-5.0-turbo';
+  select('本机 Codex（沿用已有登录）');
+  assert.equal(page.element('model').value, 'gpt-6-luna');
+  select('国内版 WorkBuddy');
+  assert.equal(page.element('model').value, 'glm-5.0-turbo');
+  page.element('model-toggle').listeners.click();
+  await settle();
+  const request = page.requests.find((row) => row.url === '/standalone-ai/models');
+  assert.ok(request);
+  assert.equal(JSON.parse(request.options.body ?? '{}').protocol, 'workbuddy');
+  await page.element('settings').listeners.submit({ preventDefault() {} });
+  assert.equal(page.lastAiBody().protocol, 'workbuddy');
+  assert.equal(page.lastAiBody().model, 'glm-5.0-turbo');
 });

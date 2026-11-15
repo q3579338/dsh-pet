@@ -90,6 +90,12 @@ test(
           'Each voice needs an actual response after the synthetic user finishes',
         );
       assert.ok(report.custom.warmRequests.some((row) => row.active && row.prepared));
+      if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
+        assert.equal(report.workbuddyConnected, true);
+        assert.equal(report.workbuddyChat, true);
+        assert.equal(report.workbuddySmallScreen, true);
+        assert.equal(report.workbuddyModel, 'deepseek-v4-flash');
+      }
     } finally {
       if (child.exitCode === null) child.kill();
       if (env.DSH_PET_NATIVE_LIVE_EVIDENCE) {
@@ -103,6 +109,7 @@ test(
           'starbell-v1.mp3',
           'sugarbud-v1.mp3',
           'dango-v1.mp3',
+          'workbuddy-settings-offscreen.png',
         ]) {
           const data = await readFile(join(run, file)).catch(() => null);
           if (data) await writeFile(join(evidence, file), data);

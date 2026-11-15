@@ -83,6 +83,28 @@ const guard = setTimeout(() => {
     assert.equal(dictation.ok, true, dictation.message);
     assert.match(dictation.text, /测试/);
     report.dictation = dictation.text;
+    if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
+      const selected = await (
+        await fetch(origin + '/standalone-ai/settings', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ protocol: 'workbuddy', model: 'deepseek-v4-flash', timeoutMs: 60000 }),
+        })
+      ).json();
+      assert.equal(selected.protocol, 'workbuddy');
+      report.workbuddyModel = selected.model;
+      const checked = await (
+        await fetch(origin + '/standalone-ai/test', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ protocol: 'workbuddy', model: 'deepseek-v4-flash' }),
+        })
+      ).json();
+      assert.equal(checked.ok, true, checked.message);
+      assert.match(checked.reply, /连接成功/);
+      assert.equal(checked.modelUsed, 'deepseek-v4-flash');
+      report.workbuddyConnected = true;
+    }
     app.emit('codex-bigfish:chat');
     let chat;
     for (let i = 0; i < 100; i++) {
@@ -319,10 +341,58 @@ const guard = setTimeout(() => {
     const memoryFile = path.join(run, 'home/dsh-pet/memory.json');
     report.memoryUntouched = !fs.existsSync(memoryFile) || fs.readFileSync(memoryFile, 'utf8').trim() === '{}';
     assert.equal(report.memoryUntouched, true);
+    if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
+      await js(
+        "(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'请用一句简短中文告诉我你准备好聊天了，句中包含连接成功四个字。');input.dispatchEvent(new Event('input',{bubbles:true}));})()",
+      );
+      await wait(100);
+      await js("document.querySelector('.pet-chat-send').click()");
+      for (let i = 0; i < 500; i++) {
+        if (
+          await js(
+            "[...document.querySelectorAll('.pet-chat-msg.is-pet .pet-chat-bubble')].some(item=>item.textContent.includes('连接成功'))",
+          )
+        )
+          break;
+        await wait(100);
+      }
+      report.workbuddyChat = await js(
+        "[...document.querySelectorAll('.pet-chat-msg.is-pet .pet-chat-bubble')].some(item=>item.textContent.includes('连接成功'))",
+      );
+      assert.equal(report.workbuddyChat, true, 'WorkBuddy must answer through the actual pet chat panel');
+    }
     await js("document.querySelector('[data-tab=config]').click()");
     for (let i = 0; i < 100; i++) {
       if (await js("!!document.querySelector('#model') && !!document.querySelector('#g-voice-name button')")) break;
       await wait(100);
+    }
+    if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
+      chat.setSize(390, 844);
+      await js(
+        "document.querySelector('#model').scrollIntoView({block:'center'});document.querySelector('#model-toggle').click()",
+      );
+      for (let i = 0; i < 120; i++) {
+        if (
+          await js(
+            "[...document.querySelectorAll('[role=option]')].some(item=>item.textContent.includes('deepseek-v4-flash'))",
+          )
+        )
+          break;
+        await wait(100);
+      }
+      assert.equal(await js("document.querySelector('#workbuddy-note').hidden"), false);
+      assert.equal(await js("document.querySelector('#apiKey').closest('.field').hidden"), true);
+      report.workbuddySmallScreen = await js(
+        "document.documentElement.scrollWidth<=innerWidth && [...document.querySelectorAll('.selectMenu')].every(menu=>{const r=menu.getBoundingClientRect();return r.left>=0 && r.right<=innerWidth})",
+      );
+      assert.equal(report.workbuddySmallScreen, true);
+      fs.writeFileSync(
+        path.join(run, 'workbuddy-settings-offscreen.png'),
+        (await chat.webContents.capturePage()).toPNG(),
+      );
+      await js(
+        "[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('deepseek-v4-flash')).click()",
+      );
     }
     await js(
       "(()=>{document.querySelector('#model').dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#save').click();})()",

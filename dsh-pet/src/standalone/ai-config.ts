@@ -17,8 +17,8 @@ export const BALANCE_PROVIDERS = ['', 'deepseek-official', 'opencode-go', 'comma
 
 /** 对外可见的设置视图：密钥只以 hasKey 表示；AI 是否可用只看地址、模型与密钥是否齐全。 */
 export interface StandaloneAiPublicSettings {
-  /** Codex 使用已有本机登录；其余协议使用独立 API 凭据。 */
-  protocol: 'openai-compatible' | 'anthropic' | 'codex';
+  /** Codex 与国内版 WorkBuddy 沿用本机登录；其它协议使用独立 API 凭据。 */
+  protocol: 'openai-compatible' | 'anthropic' | 'codex' | 'workbuddy';
   /** 服务商接口地址，为空表示尚未配置。 */
   baseUrl: string;
   /** 模型标识，原样传给服务商。 */
@@ -88,7 +88,7 @@ function containsControlChar(s: string): boolean {
 
 /** 成品配置的字段契约：长度、范围与字符集在这里一次定死。 */
 const fields = {
-  protocol: z.enum(['openai-compatible', 'anthropic', 'codex']),
+  protocol: z.enum(['openai-compatible', 'anthropic', 'codex', 'workbuddy']),
   baseUrl: z.string().max(2048).refine(safeEndpoint),
   model: z
     .string()

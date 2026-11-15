@@ -19,6 +19,7 @@ function mountProtocolSelect() {
   protocolSelect = createSelect(
     [
       { value: 'codex', label: '本机 Codex（沿用已有登录）' },
+      { value: 'workbuddy', label: '国内版 WorkBuddy' },
       { value: 'openai-compatible', label: 'OpenAI 兼容' },
       { value: 'anthropic', label: 'Anthropic' },
     ],

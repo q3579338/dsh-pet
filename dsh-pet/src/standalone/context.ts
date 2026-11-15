@@ -168,6 +168,7 @@ export function createStandaloneContext(options: StandaloneContextOptions): Stan
             balanceAuth: () => ai.balanceAuth(),
             // 语音专用密钥单独存：对话密钥属于用户选的任意服务商，不一定能用来调 DeepSeek 语音。
             deepseekKey: () => ai.deepseekKey(),
+            codexVoiceModel: () => ai.codexVoiceModel?.() ?? ai.currentSelection().model,
           },
         }
       : {}),

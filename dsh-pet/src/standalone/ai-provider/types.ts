@@ -12,6 +12,7 @@ import { type BalanceResult } from '../../host/balance/index.ts';
 import type { CodexEventSink } from '../codex/events.ts';
 import type { StandaloneBalanceAuth } from '../../host/plugin/setup.ts';
 import type { CodexChatConnection } from '../codex/chat-connection.ts';
+import type { WorkBuddyConnection } from '../workbuddy/connection.ts';
 
 /** 设置存储：`createAiConfig` 的返回形状。 */
 export type AiStore = ReturnType<typeof createAiConfig>;
@@ -29,6 +30,8 @@ export interface TestConnectionResult {
   ok: boolean;
   message: string;
   reply?: string;
+  /** WorkBuddy 原生响应里的实际型号，不根据用户填写值推断。 */
+  modelUsed?: string;
 }
 
 /** 「拉取模型」的输入：任一项缺省则沿用当前设置；空字符串视为未填。 */
@@ -72,6 +75,8 @@ export interface AiRuntime {
   codexEvents?: CodexEventSink;
   /** 同一个本机服务里的聊天与模型目录复用连接。 */
   codexConnection?: CodexChatConnection;
+  /** 国内版 WorkBuddy，只在选择它时启动。 */
+  workbuddy?: WorkBuddyConnection;
 }
 
 /** 独立模式 AI 服务的对外形状。 */
@@ -80,6 +85,8 @@ export interface StandaloneAiService {
   onSessionEvent?(listener: CodexEventSink): () => void;
   /** 当前选中的服务商与模型；未就绪时模型为空。 */
   currentSelection(): { provider: string; model: string };
+  /** 原生即时语音的 Codex 后端模型，不接收其它服务商的模型 ID。 */
+  codexVoiceModel?(): string;
   /** 就绪时返回唯一的 standalone 服务商。 */
   listProviders(): Array<{ id: string; name: string }>;
   /** 就绪时返回当前模型，否则为空。 */
@@ -116,4 +123,6 @@ export interface StandaloneAiService {
 export interface StandaloneAiDependencies {
   /** 替换 fetch 以隔离网络。 */
   fetch?: AiFetch;
+  /** 隔离验证可替换 WorkBuddy 运行组件，不访问真实账号。 */
+  workbuddy?: WorkBuddyConnection;
 }

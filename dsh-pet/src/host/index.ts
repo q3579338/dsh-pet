@@ -168,7 +168,10 @@ export function apply(ctx: any): void {
                 id: petId,
                 now: new Date(),
               }),
-              model: ctx.agentDefaultModel.currentSelection().model,
+              model:
+                (
+                  ctx as unknown as { standaloneAi?: { codexVoiceModel?(): string } }
+                ).standaloneAi?.codexVoiceModel?.() ?? ctx.agentDefaultModel.currentSelection().model,
             };
           },
           activeChanged: (active) => state.writeSection('voiceSession', { active }),

@@ -12,6 +12,7 @@ import { abortable, parseRequest } from './request.ts';
 import type { AiRuntime } from './types.ts';
 import { codexTextStream } from '../codex/transport.ts';
 import { CodexFailure } from '../codex/errors.ts';
+import { WorkBuddyFailure } from '../workbuddy/executable.ts';
 
 /** 本层自己写的固定文案：只有这些能原样透出给调用方。 */
 const OWN_MESSAGES: readonly string[] = [
@@ -22,6 +23,12 @@ const OWN_MESSAGES: readonly string[] = [
 
 /** 把传输层异常归一成可示人的错误；鉴权失败顺带置位暂停，等用户重新保存设置。 */
 function normalizeFailure(runtime: AiRuntime, controller: AbortController, error: unknown): Error {
+  if (runtime.store.current().protocol === 'workbuddy') {
+    if (controller.signal.aborted) return new WorkBuddyFailure('WorkBuddy 回复已停止或超时，请重试。');
+    return error instanceof WorkBuddyFailure
+      ? error
+      : new WorkBuddyFailure('WorkBuddy 暂未能回复，请检查登录、模型和网络。');
+  }
   if (runtime.store.current().protocol === 'codex') {
     if (controller.signal.aborted) return new Error('Codex 回复已停止或超时，请重试。', { cause: error });
     if (error instanceof CodexFailure) return error;
@@ -59,7 +66,13 @@ export function createTextStream(
     const { request, signal: callerSignal } = parseRequest(
       options,
       settings.model,
-      settings.protocol === 'codex' ? runtime.imageUrl : undefined,
+      settings.protocol === 'codex'
+        ? runtime.imageUrl
+        : settings.protocol === 'workbuddy'
+          ? () => {
+              throw new WorkBuddyFailure('当前 WorkBuddy 接入只支持文字，请切回 Codex 发送附图。');
+            }
+          : undefined,
     );
     if (callerSignal?.aborted) throw new Error('Standalone AI request cancelled.');
     if (runtime.active) throw new Error('Standalone AI is busy. Please wait.');
@@ -71,7 +84,9 @@ export function createTextStream(
     const transport =
       settings.protocol === 'codex'
         ? codexTextStream(settings, request, controller.signal, runtime.codexConnection)
-        : sdkTextStream(settings, request, controller.signal, runtime.fetcher);
+        : settings.protocol === 'workbuddy'
+          ? runtime.workbuddy!.stream(settings.model, request, controller.signal, settings.maxTokens)
+          : sdkTextStream(settings, request, controller.signal, runtime.fetcher);
     const iterator = transport[Symbol.asyncIterator]();
     let emitted = 0;
     let events = 0;

@@ -14,6 +14,8 @@ export interface StandaloneModelService {
   /** 可选的宿主状态订阅，缺失时保持独立离线模式的行为。 */
   onSessionEvent?(listener: CodexEventSink): () => void;
   currentSelection(): { provider: string; model: string };
+  /** 即时语音独立使用 Codex 模型目录。 */
+  codexVoiceModel?(): string;
   listProviders(): unknown[];
   listModels(provider: string): Promise<unknown[]>;
   resolveModelInfo(provider?: string, model?: string, signal?: AbortSignal): Promise<unknown>;

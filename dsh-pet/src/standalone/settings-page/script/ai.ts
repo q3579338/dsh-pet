@@ -12,31 +12,45 @@ export function aiScript(): string {
 const AI_SETTINGS_URL = '/standalone-ai/settings';
 const AI_TEST_URL = '/standalone-ai/test';
 const AI_BALANCE_URL = '/standalone-ai/balance';
+let previousModelProtocol = null;
+const protocolModels = new Map();
 
 function syncProtocolFields() {
   const codex = protocolSelect && protocolSelect.getValue() === 'codex';
+  const workbuddy = protocolSelect && protocolSelect.getValue() === 'workbuddy';
   const balanceResult = byId('balance-result');
   const protocol = protocolSelect && protocolSelect.getValue();
+  if (previousModelProtocol !== protocol) {
+    if (previousModelProtocol !== null) {
+      protocolModels.set(previousModelProtocol, byId('model').value);
+      byId('model').value = protocolModels.get(protocol) || (codex ? 'default' : workbuddy ? 'deepseek-v4-flash' : '');
+    }
+    previousModelProtocol = protocol;
+  }
   if (balanceResult && balanceResult.dataset.protocol !== protocol) {
     balanceResult.textContent = '';
     balanceResult.dataset.protocol = protocol;
   }
   for (const id of ['baseUrl', 'apiKey', 'deepseekApiKey']) {
     const field = byId(id) && byId(id).closest('.field');
-    if (field) field.hidden = codex;
+    if (field) field.hidden = codex || workbuddy;
   }
   if (byId('codex-note')) byId('codex-note').hidden = !codex;
-  if (byId('balance-provider-host')) byId('balance-provider-host').hidden = codex;
-  if (byId('balance-provider-label')) byId('balance-provider-label').textContent = codex ? 'Codex 额度与用量' : '余额查询服务商';
+  if (byId('workbuddy-note')) byId('workbuddy-note').hidden = !workbuddy;
+  if (byId('balance-provider-host')) byId('balance-provider-host').hidden = codex || workbuddy;
+  if (byId('balance-provider-label')) byId('balance-provider-label').textContent = codex ? 'Codex 额度与用量' : workbuddy ? 'WorkBuddy 额度' : '余额查询服务商';
   if (byId('balance-provider-note')) byId('balance-provider-note').textContent = codex
     ? '读取当前 Codex 的套餐、窗口剩余额度、重置时间、额外点数和 Token 活动。额外点数以 Credits 显示；结果最多缓存 30 秒。'
-    : '选定余额服务商后，用保存的对应密钥查询余额。';
+    : workbuddy ? '请在 WorkBuddy 中查看额度，当前接入未提供余额查询。' : '选定余额服务商后，用保存的对应密钥查询余额。';
   if (byId('balance-btn')) {
     byId('balance-btn').textContent = codex ? '刷新 Codex 额度与用量' : '查询余额';
-    byId('balance-btn').disabled = !codex && (!balanceSelect || balanceSelect.getValue() === '');
+    byId('balance-btn').hidden = workbuddy;
+    byId('balance-btn').disabled = workbuddy || (!codex && (!balanceSelect || balanceSelect.getValue() === ''));
   }
-  byId('model').placeholder = codex ? 'default：跟随本机 Codex，或从列表选择' : '填写或拉取模型 ID';
+  byId('model').placeholder = codex ? 'default：跟随本机 Codex，或从列表选择' : workbuddy ? '从 WorkBuddy 内置模型在线目录选择' : '填写或拉取模型 ID';
+  if (byId('model-note')) byId('model-note').textContent = workbuddy ? '点右侧箭头读取 WorkBuddy 在线内置模型目录，DeepSeek 优先显示；选好后点击测试连接确认实际可用。' : '可以直接手填；点右侧箭头拉取模型列表后选择，选择后保存到本机。';
   if (codex && !byId('model').value.trim()) byId('model').value = 'default';
+  if (workbuddy && !byId('model').value.trim()) byId('model').value = 'deepseek-v4-flash';
 }
 
 async function aiRequest(method, body) {
@@ -136,7 +150,7 @@ function wireBalanceQuery() {
       result.dataset.error = 'true';
       result.textContent = '✗ ' + (error && error.message ? error.message : String(error));
     } finally {
-      button.disabled = !(protocolSelect && protocolSelect.getValue() === 'codex') && (!balanceSelect || balanceSelect.getValue() === '');
+      button.disabled = (protocolSelect && protocolSelect.getValue() === 'workbuddy') || (!(protocolSelect && protocolSelect.getValue() === 'codex') && (!balanceSelect || balanceSelect.getValue() === ''));
     }
   });
 }

@@ -23,6 +23,8 @@ import type { CodexEventSink } from '../codex/events.ts';
 import { codexImageUrl } from '../codex/attachments.ts';
 import { createCodexAccountReader } from '../codex/account.ts';
 import type { BalanceResult } from '../../host/balance/types.ts';
+import { createWorkBuddyConnection } from '../workbuddy/connection.ts';
+import { WorkBuddyFailure } from '../workbuddy/executable.ts';
 
 /**
  * 保存设置：单飞、先中止在途请求，失败即暂停，等下一次保存成功才恢复。
@@ -68,6 +70,7 @@ export function createStandaloneAi(
     throw new Error('Cannot securely load standalone AI settings.');
   }
   const runtime: AiRuntime = {
+    workbuddy: dependencies.workbuddy ?? createWorkBuddyConnection(home),
     codexConnection: createCodexChatConnection(codexChatWorkspace(home)),
     imageUrl: (ref) => codexImageUrl(home, ref),
     store,
@@ -83,7 +86,8 @@ export function createStandaloneAi(
         !runtime.paused &&
         !runtime.saving &&
         !!store.current().model &&
-        (store.current().protocol === 'codex' || (!!store.current().baseUrl && !!store.current().apiKey))
+        (['codex', 'workbuddy'].includes(store.current().protocol) ||
+          (!!store.current().baseUrl && !!store.current().apiKey))
       );
     },
   };
@@ -114,6 +118,7 @@ export function createStandaloneAi(
       };
     },
     currentSelection: () => ({ provider: PROVIDER, model: runtime.ready() ? modelOf() : '' }),
+    codexVoiceModel: () => (store.current().protocol === 'codex' ? modelOf() : 'default'),
     listProviders: () => (runtime.ready() ? [{ id: PROVIDER, name: 'Standalone AI' }] : []),
     listModels: async (provider) =>
       runtime.ready() && provider === PROVIDER ? [{ id: modelOf(), name: modelOf() }] : [],
@@ -128,10 +133,31 @@ export function createStandaloneAi(
     balanceAuth: () =>
       store.current().protocol === 'codex'
         ? { provider: 'codex', apiKey: '', query: readCodexBalance }
-        : { provider: store.current().balanceProvider, apiKey: store.current().apiKey },
+        : store.current().protocol === 'workbuddy'
+          ? { provider: '', apiKey: '' }
+          : { provider: store.current().balanceProvider, apiKey: store.current().apiKey },
     deepseekKey: () => store.current().deepseekApiKey,
     async testConnection(input) {
       if (runtime.disposed) return { ok: false, message: '服务已关闭' };
+      if ((input.protocol ?? store.current().protocol) === 'workbuddy') {
+        try {
+          const { reply, modelUsed } = await runtime.workbuddy!.test(
+            input.model || (store.current().protocol === 'workbuddy' ? modelOf() : 'deepseek-v4-flash'),
+          );
+          return {
+            ok: true,
+            message:
+              '国内版 WorkBuddy 内置模型已实际回复' + (modelUsed ? '（服务端模型：' + modelUsed + '）' : '') + '。',
+            reply,
+            modelUsed,
+          };
+        } catch (error) {
+          return {
+            ok: false,
+            message: error instanceof WorkBuddyFailure ? error.message : '无法连接国内版 WorkBuddy，请检查登录和模型。',
+          };
+        }
+      }
       if ((input.protocol ?? store.current().protocol) !== 'codex')
         return testAiConnection(runtime.fetcher, store.current(), input);
       try {
@@ -153,6 +179,17 @@ export function createStandaloneAi(
     },
     async discoverModels(input) {
       if (runtime.disposed) return { ok: false, code: 'input', message: '服务已关闭' };
+      if ((input.protocol ?? store.current().protocol) === 'workbuddy') {
+        try {
+          return { ok: true, models: await runtime.workbuddy!.models() };
+        } catch (error) {
+          return {
+            ok: false,
+            code: 'workbuddy-unavailable',
+            message: error instanceof WorkBuddyFailure ? error.message : '无法读取国内版 WorkBuddy 模型。',
+          };
+        }
+      }
       if ((input.protocol ?? store.current().protocol) !== 'codex')
         return discoverModels(runtime.fetcher, store.current(), input);
       try {
@@ -170,12 +207,20 @@ export function createStandaloneAi(
         ? { ok: false, provider: '', reason: 'unsupported' }
         : store.current().protocol === 'codex'
           ? readCodexBalance()
-          : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
+          : store.current().protocol === 'workbuddy'
+            ? {
+                ok: false,
+                provider: 'workbuddy',
+                reason: 'unsupported',
+                message: 'WorkBuddy 当前接入不提供余额查询，请在 WorkBuddy 中查看额度。',
+              }
+            : queryStandaloneBalance(store.current().balanceProvider, store.current().apiKey),
     dispose() {
       runtime.disposed = true;
       runtime.active?.abort();
       accountReader.dispose();
       runtime.codexConnection?.dispose();
+      runtime.workbuddy?.dispose();
       stopMonitor();
       listeners.clear();
     },
