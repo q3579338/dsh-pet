@@ -18,7 +18,10 @@ type WarmEngine = {
   synthesizeStream: InstanceType<EdgeTtsModule['EdgeTTS']>['synthesizeStream'];
 };
 let engine: Promise<WarmEngine> | undefined;
-const connections = createSpeechConnectionPool({ connect: async () => (await warmEngine()).connectSocket() });
+const connections = createSpeechConnectionPool({
+  connect: async () => (await warmEngine()).connectSocket(),
+  capacity: 2,
+});
 
 /** SSML 和签名使用原 SDK；仅替换其连接生命周期。 */
 function warmEngine(): Promise<WarmEngine> {

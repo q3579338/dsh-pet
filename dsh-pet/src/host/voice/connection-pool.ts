@@ -1,4 +1,4 @@
-/** 连续聊天专用的单连接租用器：只复用已完整结束的一段，取消或出错立即丢弃连接。 */
+/** 连续聊天专用的有界连接租用器：只复用已完整结束的一段，取消或出错立即丢弃连接。 */
 export interface SpeechSocket {
   binaryType: string;
   readonly readyState: number;
@@ -35,9 +35,12 @@ function headers(data: unknown): string {
 export function createSpeechConnectionPool(options: {
   connect(): Promise<SpeechSocket>;
   idleMs?: number;
+  /** 连续语音可留一条备用连接，供打断后的下一轮或第二段预取；默认仍只保留一条。 */
+  capacity?: number;
 }): SpeechConnectionPool {
   let owner: string | undefined;
-  let slot: Slot | undefined;
+  const slots = new Set<Slot>();
+  const capacity = options.capacity === 2 ? 2 : 1;
   let opening: Promise<boolean> | undefined;
   let generation = 0;
   let warmRetryAt = 0;
@@ -45,9 +48,9 @@ export function createSpeechConnectionPool(options: {
   const retired = new Set<string>();
   const drop = (entry: Slot, replace = false): void => {
     clearTimeout(entry.timer);
-    if (slot === entry) slot = undefined;
+    slots.delete(entry);
     entry.raw.close();
-    if (replace && owner && !slot) {
+    if (replace && owner && slots.size < capacity) {
       clearTimeout(replenish);
       const attempt = generation;
       replenish = setTimeout(() => {
@@ -80,7 +83,7 @@ export function createSpeechConnectionPool(options: {
           owner = undefined;
           generation++;
           opening = undefined;
-          if (slot) drop(slot);
+          for (const entry of slots) drop(entry);
         }
         return false;
       }
@@ -90,9 +93,9 @@ export function createSpeechConnectionPool(options: {
         owner = id;
         generation++;
         opening = undefined;
-        if (slot && !slot.lease) drop(slot);
+        for (const entry of slots) if (!entry.lease) drop(entry);
       }
-      if (slot && slot.raw.readyState <= 1) return true;
+      if (slots.size >= capacity) return true;
       if (opening) return opening;
       if (Date.now() < warmRetryAt) return false;
       const attempt = generation;
@@ -105,7 +108,7 @@ export function createSpeechConnectionPool(options: {
             return false;
           }
           const entry: Slot = { raw };
-          slot = entry;
+          slots.add(entry);
           raw.binaryType = 'arraybuffer';
           raw.onopen = (event) => entry.lease?.onopen?.(event);
           raw.onmessage = (event) => {
@@ -119,13 +122,13 @@ export function createSpeechConnectionPool(options: {
           };
           raw.onerror = (event) => {
             warmRetryAt = Date.now() + 15000;
-            if (slot === entry) slot = undefined;
+            slots.delete(entry);
             clearTimeout(entry.timer);
             entry.lease?.onerror?.(event);
             raw.close();
           };
           raw.onclose = (event) => {
-            if (slot === entry) slot = undefined;
+            slots.delete(entry);
             clearTimeout(entry.timer);
             end(entry.lease, event);
           };
@@ -143,8 +146,8 @@ export function createSpeechConnectionPool(options: {
     },
     /** SDK 仍负责 SSML、声音参数与协议；只把“本段结束”与“物理断连”分开。 */
     take(fallback: () => SpeechSocket): SpeechSocket {
-      const entry = slot;
-      if (!owner || !entry || entry.lease || entry.raw.readyState > 1) return fallback();
+      const entry = [...slots].find((item) => !item.lease && item.raw.readyState <= 1);
+      if (!owner || !entry) return fallback();
       clearTimeout(entry.timer);
       const lease: Lease = {
         binaryType: 'arraybuffer',
@@ -169,7 +172,7 @@ export function createSpeechConnectionPool(options: {
         },
         close() {
           if (lease.ended) return;
-          if (lease.complete && owner && slot === entry && entry.raw.readyState === 1) {
+          if (lease.complete && owner && slots.has(entry) && entry.raw.readyState === 1) {
             entry.lease = undefined;
             idle(entry);
             queueMicrotask(() => end(lease, { code: 1000 }));
@@ -177,6 +180,8 @@ export function createSpeechConnectionPool(options: {
         },
       };
       entry.lease = lease;
+      // 第一段开始后准备备用连接，第二段或打断后的新轮无需再等一次握手。
+      if (slots.size < capacity && owner) void pool.prepare(owner, true);
       if (entry.raw.readyState === 1)
         queueMicrotask(() => {
           if (lease.ended) return;

@@ -112,6 +112,35 @@ test('首句在整轮结束前播放；最多预取两段，并按原顺序完�
   queue.dispose();
 });
 
+test('首批文字很短时只等待一次截止时间，后续凑够正文立即合成，最终正文完整且不重读', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const requested: string[] = [];
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        return new Blob([text]);
+      },
+      play: async () => {},
+    },
+  });
+  queue.begin();
+  queue.append('听');
+  t.mock.timers.tick(160);
+  queue.append('到你');
+  await tick();
+  assert.deepEqual(requested, []);
+  queue.append('啦');
+  await tick();
+  assert.deepEqual(requested, ['听到你啦']);
+  queue.append('，一起聊聊吧。');
+  queue.finish();
+  await tick();
+  assert.equal(requested.join(''), '听到你啦，一起聊聊吧。');
+  queue.dispose();
+});
+
 test('打断会取消旧轮的合成，迟到结果不播放，新轮仍能发声', async () => {
   let oldSignal: AbortSignal | undefined;
   let release: ((audio: Blob) => void) | undefined;

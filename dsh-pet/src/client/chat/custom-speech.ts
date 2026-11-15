@@ -50,6 +50,7 @@ export function createCustomSpeechQueue(options: {
     jobs: Job[];
     pending: number;
     playing: boolean;
+    firstDue: boolean;
     timer?: ReturnType<typeof setTimeout>;
   };
   let current: Turn | undefined;
@@ -145,6 +146,7 @@ export function createCustomSpeechQueue(options: {
           jobs: [],
           pending: 0,
           playing: false,
+          firstDue: false,
         };
     },
     append(text) {
@@ -159,14 +161,17 @@ export function createCustomSpeechQueue(options: {
         turn.timer = undefined;
       }
       flush(turn);
+      // 首批只有一两个字时保留原截止时间；凑够可朗读正文就立即交付，不再多等一轮。
+      if (turn.first && turn.firstDue && turn.buffer.length >= 4) flush(turn, true);
       if (wasFirst && !turn.first) {
         clearTimeout(turn.timer);
         turn.timer = undefined;
       }
-      if (turn.buffer && (!turn.first || !turn.timer))
+      if (turn.buffer && (!turn.first || (!turn.timer && !turn.firstDue)))
         turn.timer = setTimeout(
           () => {
             turn.timer = undefined;
+            if (turn.first) turn.firstDue = true;
             if (valid(turn) && turn.buffer.length >= (turn.first ? 4 : 40)) flush(turn, true);
           },
           turn.first ? 160 : 650,

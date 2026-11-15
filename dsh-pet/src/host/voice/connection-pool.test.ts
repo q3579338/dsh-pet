@@ -178,3 +178,94 @@ test('开口打断关闭旧连接后自动补回准备；结束通话会取消�
   assert.equal(sockets.length, 2);
   assert.ok(sockets.every((raw) => raw.closed > 0));
 });
+
+test('备用连接在首段传输时准备，打断后下一轮立即租用，结束时全部关闭', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sockets: FakeSocket[] = [];
+  const pool = createSpeechConnectionPool({
+    capacity: 2,
+    connect: async () => {
+      const raw = new FakeSocket();
+      sockets.push(raw);
+      return raw;
+    },
+  });
+  await pool.prepare('call', true);
+  const first = pool.take(() => assert.fail('First utterance should be prepared'));
+  await tick();
+  assert.equal(sockets.length, 2);
+  first.send('X-RequestId:old\r\nPath:ssml\r\n\r\n旧回复');
+  first.close();
+  const next = pool.take(() => assert.fail('Barge-in must use the already prepared spare'));
+  let received = 0;
+  next.onmessage = () => received++;
+  next.send('X-RequestId:new\r\nPath:ssml\r\n\r\n新回复');
+  sockets[0].receive('X-RequestId:old\r\nPath:turn.end\r\n\r\n');
+  assert.equal(received, 0);
+  sockets[1].receive('X-RequestId:new\r\nPath:turn.end\r\n\r\n');
+  assert.equal(received, 1);
+  next.close();
+  await tick();
+  // 活跃连接与备用连接总数始终有界；反复准备不会继续开连接。
+  for (let i = 0; i < 5; i++) await pool.prepare('call', true);
+  assert.equal(sockets.filter((raw) => raw.readyState <= 1).length, 2);
+  await pool.prepare('call', false);
+  t.mock.timers.tick(20000);
+  await tick();
+  assert.ok(sockets.every((raw) => raw.closed > 0));
+  assert.equal(sockets.length, 3);
+});
+
+test('备用连接准备期间不会混用已有合成，迟到连接随结束释放', async () => {
+  const raw = new FakeSocket(),
+    late = new FakeSocket(),
+    fallback = new FakeSocket();
+  let finish!: (socket: SpeechSocket) => void;
+  let connects = 0;
+  const pool = createSpeechConnectionPool({
+    capacity: 2,
+    connect: async () =>
+      ++connects === 1
+        ? raw
+        : new Promise((resolve) => {
+            finish = resolve;
+          }),
+  });
+  await pool.prepare('call', true);
+  pool.take(() => assert.fail());
+  await tick();
+  assert.equal(
+    pool.take(() => fallback),
+    fallback,
+  );
+  await pool.prepare('call', false);
+  finish(late);
+  await tick();
+  assert.equal(connects, 2);
+  assert.equal(raw.closed, 1);
+  assert.equal(late.closed, 1);
+});
+
+test('两条连接同时传输时第三段不占用旧租约，反复准备也不会扩容', async () => {
+  let connects = 0;
+  const pool = createSpeechConnectionPool({
+    capacity: 2,
+    connect: async () => {
+      connects++;
+      return new FakeSocket();
+    },
+  });
+  await pool.prepare('call', true);
+  const first = pool.take(() => assert.fail());
+  await tick();
+  const second = pool.take(() => assert.fail());
+  assert.notEqual(first, second);
+  const fallback = new FakeSocket();
+  assert.equal(
+    pool.take(() => fallback),
+    fallback,
+  );
+  for (let i = 0; i < 5; i++) await pool.prepare('call', true);
+  assert.equal(connects, 2);
+  await pool.prepare('call', false);
+});

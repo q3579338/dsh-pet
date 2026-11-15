@@ -109,7 +109,7 @@ const guard = setTimeout(() => {
     assert.equal(report.stylePicker.streaming, true);
     await js(`(async()=>{
       window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[],utterances:[],warmRequests:[]};
-      document.addEventListener('pet-custom-voice-play',event=>{const row=__live.currentUtterance;__live.metrics.push({...event.detail,...(row?{fromSpeechEndMs:Math.round(performance.now()-row.endAt)}:{})});});
+      document.addEventListener('pet-custom-voice-play',event=>{const row=__live.currentUtterance;const now=performance.now();__live.metrics.push({...event.detail,...(row?{fromSpeechEndMs:Math.round(now-row.endAt),recognitionMs:row.recognizedAt===undefined?undefined:Math.round(row.recognizedAt-row.endAt),modelToFirstTextMs:row.recognizedAt===undefined?undefined:Math.round(now-event.detail.fromTextMs-row.recognizedAt)}:{})});});
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
         const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
         const warm=String(url).endsWith('/voice/warm')?{active:JSON.parse(init?.body||'{}').active,at:performance.now()}:undefined;if(warm)__live.warmRequests.push(warm);
@@ -126,7 +126,7 @@ const guard = setTimeout(() => {
       window.__speakLiveSample=async()=>{const source=__ctx.createBufferSource();source.buffer=__sample;source.connect(__out);await __ctx.resume();const row={startAt:performance.now(),endAt:performance.now()+__sample.duration*1000};__live.utterances.push(row);source.start();};
       const RealPeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(RealPeer,{construct(target,args){
         const peer=new target(...args);__live.peers.push(peer);
-        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.type==='input_transcript.added'){__live.inputs++;__live.currentInput=__live.utterances[__live.utterances.length-1];}if(value.type==='turn.created'&&value.turn.role==='assistant'){__live.assistantCreated++;__live.currentUtterance=__live.currentInput;}if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.assistantDoneAt.push(performance.now());}});return channel;};
+        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.type==='input_transcript.added'){__live.inputs++;__live.currentInput=__live.utterances[__live.utterances.length-1];if(__live.currentInput)__live.currentInput.recognizedAt??=performance.now();}if(value.type==='turn.created'&&value.turn.role==='assistant'){__live.assistantCreated++;__live.currentUtterance=__live.currentInput;}if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.assistantDoneAt.push(performance.now());}});return channel;};
         peer.addEventListener('track',event=>{
           const stream=event.streams[0]||new MediaStream([event.track]);window.__recorder=new MediaRecorder(stream);
           __recorder.ondataavailable=event=>{if(event.data.size)__live.blobs.push(event.data);};__recorder.start(500);
