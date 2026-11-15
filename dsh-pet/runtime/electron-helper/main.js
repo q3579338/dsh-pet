@@ -82,7 +82,7 @@ if (process.platform === 'win32') {
   );
 }
 // 应用模式只改数据目录、不改应用名：共用同一个 userData 时两个 Chromium 进程会抢同一份 profile 互踢。
-if (APP_MODE)
+if (APP_MODE && !app.commandLine.getSwitchValue('user-data-dir'))
   app.setPath(
     'userData',
     path.join(app.getPath('appData'), process.env.DSH_PET_CODEX === '1' ? 'codex-bigfish' : 'dsh-pet'),

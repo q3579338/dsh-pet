@@ -235,7 +235,12 @@ function sendIcon(h: ChatPanelRuntime['h']): unknown {
  * 造型对齐 DSH 自己的输入框；`focus-within` 让整个容器而不是内层框变色，
  * 因为内层 textarea 已经没有边框了。
  */
-export function composerNode(h: ChatPanelRuntime['h'], t: ChatPanelRuntime['t'], state: ChatPanelState): unknown {
+export function composerNode(
+  h: ChatPanelRuntime['h'],
+  t: ChatPanelRuntime['t'],
+  state: ChatPanelState,
+  speechInput = false,
+): unknown {
   return h('div', {
     className: 'pet-chat-composer' + (state.busy ? ' is-busy' : ''),
     // 生成中整块压灰：读屏与视觉都据此说明「这条已经发出去了」
@@ -291,6 +296,16 @@ export function composerNode(h: ChatPanelRuntime['h'], t: ChatPanelRuntime['t'],
             ],
           }),
           h('span', { className: 'pet-chat-composer-spacer' }),
+          speechInput
+            ? h('button', {
+                type: 'button',
+                className: 'pet-chat-tool pet-chat-mic',
+                title: '按住说话',
+                'aria-label': '按住说话',
+                disabled: state.busy,
+                children: '按住说话',
+              })
+            : null,
           h('button', {
             type: 'button',
             className: 'pet-chat-send' + (state.busy ? ' is-busy' : ''),
@@ -304,6 +319,7 @@ export function composerNode(h: ChatPanelRuntime['h'], t: ChatPanelRuntime['t'],
           }),
         ],
       }),
+      speechInput ? h('div', { className: 'pet-chat-hear-hint', role: 'status', 'aria-live': 'polite' }) : null,
     ],
   });
 }

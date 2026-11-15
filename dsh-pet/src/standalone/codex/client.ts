@@ -5,6 +5,8 @@
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolveCodexExecutable } from './executable.ts';
+import { codexChildEnvironment } from './network.ts';
+import { codexFailure, CodexFailure } from './errors.ts';
 
 /** 已解析的通知；载荷在消费处按事件种类校验。 */
 export interface CodexNotification {
@@ -36,31 +38,33 @@ export class CodexClient {
       stdio: 'pipe',
       windowsHide: true,
       shell: false,
+      env: codexChildEnvironment(),
     });
     this.child.stdout.setEncoding('utf8');
     this.child.stdout.on('data', (chunk: string) => this.receive(chunk));
     this.child.stderr.resume();
-    this.child.stdin.on('error', () => this.close(new Error('Codex 连接写入失败，请重试。')));
-    this.child.on('error', () => this.close(new Error('无法启动本机 Codex，请检查程序路径与登录状态。')));
-    this.child.on('exit', () => this.close(new Error('Codex 连接已关闭，请重试。')));
+    this.child.stdin.on('error', () => this.close(new CodexFailure('Codex 连接写入失败，请重试。')));
+    this.child.on('error', () => this.close(new CodexFailure('无法启动本机 Codex，请检查程序路径与登录状态。')));
+    this.child.on('exit', () => this.close(new CodexFailure('Codex 连接已关闭，请重试。')));
   }
 
   /** 按官方顺序完成握手；不创建对话，也不发起模型请求。 */
   async initialize(): Promise<void> {
     await this.request('initialize', {
-      clientInfo: { name: 'codex_bigfish', title: '大肥鱼 Codex', version: '0.1.0' },
+      clientInfo: { name: 'codex_bigfish', title: '大肥鱼 Codex', version: '0.4.9' },
+      capabilities: { experimentalApi: true },
     });
     this.send({ method: 'initialized', params: {} });
   }
 
   /** 请求有独立超时，关闭连接后不会留下永久等待的 Promise。 */
   request(method: string, params: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
-    if (this.closed) return Promise.reject(new Error('Codex 连接已关闭，请重试。'));
+    if (this.closed) return Promise.reject(new CodexFailure('Codex 连接已关闭，请重试。'));
     const id = ++this.sequence;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error('等待 Codex 响应超时，请重试。'));
+        reject(new CodexFailure('等待 Codex 响应超时，请检查网络或代理后重试。'));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
       this.send({ id, method, params });
@@ -81,6 +85,11 @@ export class CodexClient {
     return () => {
       this.closeListeners.delete(listener);
     };
+  }
+
+  /** 缓存连接只复用仍然存活的自己启动的子进程。 */
+  isAlive(): boolean {
+    return !this.closed && this.child.exitCode === null && !this.child.killed;
   }
 
   /** 关闭自己启动的进程，不触碰用户正在使用的 Codex 桌面端。 */
@@ -133,7 +142,7 @@ export class CodexClient {
       if (!pending) return;
       this.pending.delete(message.id);
       clearTimeout(pending.timer);
-      if (message.error) pending.reject(new Error('Codex 拒绝了请求，请检查登录、模型或版本兼容性。'));
+      if (message.error) pending.reject(codexFailure(message.error));
       else pending.resolve(message.result);
       return;
     }

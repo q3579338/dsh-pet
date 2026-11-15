@@ -12,6 +12,9 @@ import { writePrivateJson } from './ai-storage.ts';
 
 /** 运行状态内容；token 只交给本机启动器。 */
 interface RuntimeDetails {
+  /** 桌面应用与 CLI 共享本机启动清单。 */
+  name?: 'dsh-pet-app' | 'dsh-pet-standalone';
+  version?: string;
   /** 实际监听端口。 */
   port: number;
   /** 本次运行的能力令牌。 */

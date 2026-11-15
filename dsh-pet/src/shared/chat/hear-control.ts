@@ -64,6 +64,7 @@ export interface HearControl {
  */
 export function createHearControl(opts: HearControlOptions): HearControl {
   const { micBtn, input, hint, resizeInput, hearUrl } = opts;
+  const lifetime = new AbortController();
   let hearState: HearState = 'idle';
   let recorder: HearRecorder | null = null;
   let hearTimer = 0;
@@ -72,6 +73,7 @@ export function createHearControl(opts: HearControlOptions): HearControl {
 
   /** 按钮外观：录音阶段画红，识别阶段禁用（避免连点开两次）。 */
   const paint = (): void => {
+    if (lifetime.signal.aborted) return;
     if (hearState === 'starting' || hearState === 'recording') micBtn.dataset.hear = 'recording';
     else delete micBtn.dataset.hear;
     micBtn.disabled = hearState === 'transcribing';
@@ -98,7 +100,7 @@ export function createHearControl(opts: HearControlOptions): HearControl {
 
   /** 失败原因翻成人话；宿主给的 message 有就附上，方便对着日志排查。 */
   const describeFailure = (outcome: Extract<HearOutcome, { ok: false }>): string => {
-    if (outcome.reason === 'unsupported') return '这个宿主没开语音识别';
+    if (outcome.reason === 'unsupported') return '语音识别不可用：' + (outcome.message || '请检查系统语音组件');
     if (outcome.reason === 'bad-request') return '音频没通过宿主校验';
     if (outcome.reason === 'network') return '识别请求失败：' + outcome.message;
     return '识别失败：' + (outcome.message || '未知原因');
@@ -124,6 +126,7 @@ export function createHearControl(opts: HearControlOptions): HearControl {
     hint.show('识别中…');
     try {
       const clip = await current.stop();
+      if (lifetime.signal.aborted) return;
       if (clip === null) {
         hint.flash('没录到声音');
         return;
@@ -134,8 +137,8 @@ export function createHearControl(opts: HearControlOptions): HearControl {
         return;
       }
       if (!input.isConnected) return; // 等结果的这会儿弹窗被关了
-      const outcome = await hearAudio(hearUrl, toBase64(clip.wave));
-      if (!input.isConnected) return;
+      const outcome = await hearAudio(hearUrl, toBase64(clip.wave), lifetime.signal);
+      if (lifetime.signal.aborted || !input.isConnected) return;
       if (!outcome.ok) {
         hint.flash(describeFailure(outcome));
         return;
@@ -148,7 +151,7 @@ export function createHearControl(opts: HearControlOptions): HearControl {
       hint.hide();
       insertText(text);
     } catch (e) {
-      hint.flash('录音出错：' + (e instanceof Error ? e.message : String(e)));
+      if (!lifetime.signal.aborted) hint.flash('录音出错：' + (e instanceof Error ? e.message : String(e)));
     } finally {
       hearState = 'idle';
       paint();
@@ -157,6 +160,7 @@ export function createHearControl(opts: HearControlOptions): HearControl {
 
   /** 开录：先要麦克风，拿到了才开始计时。 */
   const start = async (): Promise<void> => {
+    if (lifetime.signal.aborted) return;
     const blocked = blockedReason();
     if (blocked !== '') {
       hint.flash(blocked);
@@ -172,6 +176,11 @@ export function createHearControl(opts: HearControlOptions): HearControl {
     hint.show('正在打开麦克风…');
     try {
       recorder = await startRecording();
+      if (lifetime.signal.aborted) {
+        recorder.cancel();
+        recorder = null;
+        return;
+      }
     } catch (e) {
       hearState = 'idle';
       paint();
@@ -196,17 +205,21 @@ export function createHearControl(opts: HearControlOptions): HearControl {
     }, 200);
   };
 
-  micBtn.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault(); // 别把焦点从输入框抢走，也别触发选区
-    try {
-      // 捕获指针：松手时鼠标可能已经移出按钮甚至移出窗口，靠它才收得到 pointerup
-      micBtn.setPointerCapture(e.pointerId);
-    } catch {
-      /* 指针已经不在了（窗口失焦/合成事件）：收不到松手就等 24 秒上限兜底 */
-    }
-    void start();
-  });
+  micBtn.addEventListener(
+    'pointerdown',
+    (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); // 别把焦点从输入框抢走，也别触发选区
+      try {
+        // 捕获指针：松手时鼠标可能已经移出按钮甚至移出窗口，靠它才收得到 pointerup
+        micBtn.setPointerCapture(e.pointerId);
+      } catch {
+        /* 指针已经不在了（窗口失焦/合成事件）：收不到松手就等 24 秒上限兜底 */
+      }
+      void start();
+    },
+    { signal: lifetime.signal },
+  );
   /** 松手或指针被系统抢走（切窗口）都算说完；还在等麦克风时先记下，等它回来立刻收尾。 */
   const onRelease = (): void => {
     if (hearState === 'starting') {
@@ -215,14 +228,15 @@ export function createHearControl(opts: HearControlOptions): HearControl {
     }
     if (hearState === 'recording') void stop();
   };
-  micBtn.addEventListener('pointerup', onRelease);
-  micBtn.addEventListener('pointercancel', onRelease);
+  micBtn.addEventListener('pointerup', onRelease, { signal: lifetime.signal });
+  micBtn.addEventListener('pointercancel', onRelease, { signal: lifetime.signal });
 
   return {
     start: () => void start(),
     stop: () => void stop(),
     isHearing: () => hearState === 'recording',
     dispose: () => {
+      lifetime.abort();
       window.clearInterval(hearTimer);
       // 关弹窗时麦克风必须立刻松手：录音中直接丢弃，不等识别
       if (recorder) {

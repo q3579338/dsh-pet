@@ -46,6 +46,8 @@ extraFiles:
     to: CODEX-README.md
   - from: ../CODEX-VALIDATION.md
     to: CODEX-VALIDATION.md
+  - from: ../CODEX-THIRD-PARTY-NOTICES.txt
+    to: CODEX-THIRD-PARTY-NOTICES.txt
 
 # 与 package.json 的 @electron/get 默认下载版本保持一致；改版本时两处一起改
 electronVersion: 43.3.0

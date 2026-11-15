@@ -156,6 +156,12 @@ function boot() {
   // 目录先于配置渲染：voiceCard 要用它决定下拉里有哪些音色与识别实现
   loadVoiceCatalog().then(loadPets);
   loadAi();
+  fetch('/health', { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { 'X-DSH-Pet-Token': TOKEN } })
+    .then((response) => response.ok ? response.json() : null)
+    .then((data) => {
+      if (data && typeof data.version === 'string' && /^[0-9][0-9A-Za-z.+-]{0,39}$/.test(data.version))
+        byId('app-version').textContent = ' · ' + data.version;
+    }).catch(() => {});
 }
 `;
 }

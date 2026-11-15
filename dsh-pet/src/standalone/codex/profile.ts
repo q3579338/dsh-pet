@@ -6,6 +6,22 @@ import { dirname } from 'node:path';
 import { readJsonc } from '../../host/config/jsonc.ts';
 import type { ConfigPaths } from '../../host/config.ts';
 import { writePrivateJson } from '../ai-storage.ts';
+import { WINDOWS_SPEECH_ID, WINDOWS_VOICE_ID } from '../../host/voice/windows/providers.ts';
+
+/** 缺省和旧 DSH 识别通道迁移到本机语音，明确选择的其他通道与播报开关继续保留。 */
+function localSpeechDefaults(config: Record<string, unknown>): Record<string, unknown> {
+  if (process.platform !== 'win32') return config;
+  return {
+    ...config,
+    ...(config.speechProvider === undefined || config.speechProvider === 'dsh'
+      ? { speechProvider: WINDOWS_SPEECH_ID }
+      : {}),
+    ...(config.voiceName === undefined || config.voiceName === 'edge/zh-CN-XiaoyiNeural'
+      ? { voiceName: WINDOWS_VOICE_ID }
+      : {}),
+    ...(config.voiceEnabled === undefined ? { voiceEnabled: true } : {}),
+  };
+}
 
 /** 仅在本适配版入口调用，显式 DSH_HOME 继续用于测试与便携部署。 */
 export function useCodexProfile(): void {
@@ -24,15 +40,17 @@ export function seedCodexProfile(paths: ConfigPaths): void {
     whisperEnabled: false,
     balanceEnabled: true,
   }));
-  const seed = {
+  const seed = localSpeechDefaults({
     pets,
     eventsRefreshSec: { ...(defaults.eventsRefreshSec as Record<string, unknown> | undefined), balance: 120 },
-  };
+  });
   if (existsSync(paths.userFile)) {
+    const current = readJsonc(paths.userFile);
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return;
     const previousSeed = { pets: pets.map((pet) => ({ ...pet, balanceEnabled: false })) };
     // 只升级上版未编辑过的自动默认文件；自定义宠物和显式开关继续保留。
-    if (JSON.stringify(readJsonc(paths.userFile)) === JSON.stringify(previousSeed))
-      writePrivateJson(paths.userFile, seed);
+    const next = JSON.stringify(current) === JSON.stringify(previousSeed) ? seed : localSpeechDefaults(current);
+    if (JSON.stringify(next) !== JSON.stringify(current)) writePrivateJson(paths.userFile, next);
     return;
   }
   mkdirSync(dirname(paths.userFile), { recursive: true });

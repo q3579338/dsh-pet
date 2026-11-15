@@ -130,7 +130,7 @@ export function buildPanel(rt: ChatPanelRuntime, state: ChatPanelState): unknown
       confirmNode(rt, state),
       previewNode(rt, state),
       state.error === '' ? null : h('div', { className: 'pet-chat-error', role: 'alert', children: state.error }),
-      composerNode(h, rt.t, state),
+      composerNode(h, rt.t, state, rt.speechInput === true),
     ],
   });
 }

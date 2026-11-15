@@ -13,7 +13,11 @@ import { discoverModels } from './list-models.ts';
 import { queryStandaloneBalance } from './balance.ts';
 import { createTextStream } from './stream.ts';
 import { testAiConnection } from './test-connection.ts';
-import { discoverCodexModels } from '../codex/transport.ts';
+import { codexChatWorkspace, discoverCodexModels } from '../codex/transport.ts';
+import { createCodexChatConnection } from '../codex/chat-connection.ts';
+import { codexRecord } from '../codex/client.ts';
+import { selectChatModel } from '../codex/chat-policy.ts';
+import { CodexFailure } from '../codex/errors.ts';
 import { startCodexMonitor } from '../codex/monitor.ts';
 import type { CodexEventSink } from '../codex/events.ts';
 import { codexImageUrl } from '../codex/attachments.ts';
@@ -64,6 +68,7 @@ export function createStandaloneAi(
     throw new Error('Cannot securely load standalone AI settings.');
   }
   const runtime: AiRuntime = {
+    codexConnection: createCodexChatConnection(codexChatWorkspace(home)),
     imageUrl: (ref) => codexImageUrl(home, ref),
     store,
     logger,
@@ -130,10 +135,20 @@ export function createStandaloneAi(
       if ((input.protocol ?? store.current().protocol) !== 'codex')
         return testAiConnection(runtime.fetcher, store.current(), input);
       try {
-        const models = await discoverCodexModels();
-        return { ok: true, message: `已连接本机 Codex，读取到 ${models.length - 1} 个模型；本次检查未请求聊天回复。` };
-      } catch {
-        return { ok: false, message: '无法连接本机 Codex。请先打开并登录 Codex，或检查 DSH_PET_CODEX_PATH。' };
+        const connection = runtime.codexConnection!;
+        const client = await connection.open();
+        const [models, auth] = await Promise.all([
+          connection.models(),
+          client.request('account/read', { refreshToken: false }),
+        ]);
+        if (!codexRecord(auth).account) throw new CodexFailure('请先在 Codex 中登录，再测试连接。');
+        selectChatModel(models, input.model || store.current().model);
+        return { ok: true, message: `已连接本机 Codex，读取到 ${models.length} 个可用模型；本次检查未请求聊天回复。` };
+      } catch (error) {
+        return {
+          ok: false,
+          message: error instanceof CodexFailure ? error.message : '无法连接本机 Codex。请检查程序路径与登录状态。',
+        };
       }
     },
     async discoverModels(input) {
@@ -141,7 +156,7 @@ export function createStandaloneAi(
       if ((input.protocol ?? store.current().protocol) !== 'codex')
         return discoverModels(runtime.fetcher, store.current(), input);
       try {
-        return { ok: true, models: await discoverCodexModels() };
+        return { ok: true, models: await discoverCodexModels(runtime.codexConnection) };
       } catch {
         return {
           ok: false,
@@ -160,6 +175,7 @@ export function createStandaloneAi(
       runtime.disposed = true;
       runtime.active?.abort();
       accountReader.dispose();
+      runtime.codexConnection?.dispose();
       stopMonitor();
       listeners.clear();
     },

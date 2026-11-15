@@ -7,34 +7,30 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import type { StandaloneAiSettings } from '../ai-config.ts';
 import type { AiRequest, AiTransportEvent } from '../ai-transport.ts';
-import { CodexClient, codexRecord } from './client.ts';
-import { CodexQueue, type CodexEventSink } from './events.ts';
+import { codexRecord } from './client.ts';
+import { CodexQueue } from './events.ts';
 import type { DiscoveredModel } from '../ai-provider/types.ts';
+import { createCodexChatConnection, type CodexChatConnection } from './chat-connection.ts';
+import { companionThreadConfig, selectChatModel } from './chat-policy.ts';
+import { codexFailure, CodexFailure } from './errors.ts';
 
 /** 桌宠的 Codex 对话工作区独立于游戏项目，避免加载游戏的工程指令。 */
-function chatWorkspace(): string {
-  const home = process.env.DSH_HOME || join(homedir(), '.codex-bigfish');
+export function codexChatWorkspace(home = process.env.DSH_HOME || join(homedir(), '.codex-bigfish')): string {
   const workspace = join(home, 'codex-chat');
   mkdirSync(workspace, { recursive: true });
   return workspace;
 }
 
 /** 只读本机 Codex 声明的模型，不硬编码账号未开放的型号。 */
-export async function discoverCodexModels(): Promise<DiscoveredModel[]> {
-  const client = new CodexClient(chatWorkspace());
+export async function discoverCodexModels(connection?: CodexChatConnection): Promise<DiscoveredModel[]> {
+  const own = connection ?? createCodexChatConnection(codexChatWorkspace());
   try {
-    await client.initialize();
-    const result = codexRecord(await client.request('model/list', { limit: 100 }));
-    const models: DiscoveredModel[] = [{ id: 'default', name: '跟随本机 Codex 默认模型' }];
-    for (const entry of Array.isArray(result.data) ? result.data : []) {
-      const model = codexRecord(entry);
-      const id = typeof model.model === 'string' ? model.model : model.id;
-      if (typeof id === 'string' && id && !models.some((candidate) => candidate.id === id))
-        models.push({ id, name: typeof model.displayName === 'string' ? model.displayName : id });
-    }
-    return models;
+    return [
+      { id: 'default', name: '自动：当前账号默认模型' },
+      ...(await own.models()).map(({ id, name }) => ({ id, name })),
+    ];
   } finally {
-    client.close();
+    if (!connection) own.dispose();
   }
 }
 
@@ -43,19 +39,15 @@ export async function* codexTextStream(
   settings: Readonly<StandaloneAiSettings>,
   request: AiRequest,
   signal: AbortSignal,
-  publish?: CodexEventSink,
+  connection?: CodexChatConnection,
 ): AsyncGenerator<AiTransportEvent> {
-  const cwd = chatWorkspace();
-  const client = new CodexClient(cwd);
+  const cwd = codexChatWorkspace();
+  const own = connection ?? createCodexChatConnection(cwd);
+  const client = await own.open();
   const queue = new CodexQueue<AiTransportEvent>();
   let threadId = '';
-  let sequence = 0;
   let receivedText = false;
   let completed = false;
-  let ended = false;
-  const emit = (type: string, data?: Record<string, unknown>): void => {
-    if (threadId) publish?.({ sessionId: threadId, event: { type, seq: ++sequence, data } });
-  };
   const closeOff = client.onClose((error) => queue.fail(error));
   const notificationOff = client.onNotification(({ method, params }) => {
     if (typeof params.threadId === 'string' && threadId && params.threadId !== threadId) return;
@@ -73,29 +65,34 @@ export async function* codexTextStream(
     if (method === 'turn/completed') {
       const turn = codexRecord(params.turn);
       completed = turn.status === 'completed';
-      ended = true;
-      emit('turn/end', {
-        reason: { kind: completed ? 'completed' : turn.status === 'interrupted' ? 'aborted' : 'error' },
-      });
-      if (completed) queue.end();
-      else queue.fail(new Error('Codex 未完成本次回复，请重试。'));
+      if (completed && receivedText) queue.end();
+      else
+        queue.fail(
+          turn.error
+            ? codexFailure(turn.error)
+            : new CodexFailure('Codex 没有返回回复文字，请查看额度或重新选择可用模型。'),
+        );
     }
+    if (method === 'error' && params.willRetry === false) queue.fail(codexFailure(params.error));
   });
   const abort = (): void => {
     queue.fail(new Error('Codex 回复已停止。'));
-    client.close();
+    own.reset();
   };
   signal.addEventListener('abort', abort, { once: true });
   try {
     if (signal.aborted) throw new Error('Codex 回复已停止。');
-    await client.initialize();
+    const [models, current] = await Promise.all([own.models(), client.request('config/read', {})]);
+    const selected = selectChatModel(models, settings.model);
+    if (signal.aborted) throw new CodexFailure('Codex 回复已停止。');
     const started = codexRecord(
       await client.request('thread/start', {
         cwd,
         ephemeral: true,
         sandbox: 'read-only',
-        approvalPolicy: 'untrusted',
-        ...(settings.model !== 'default' ? { model: settings.model } : {}),
+        approvalPolicy: 'never',
+        model: selected.id,
+        config: companionThreadConfig(codexRecord(current).config),
         baseInstructions:
           'You are a desktop companion in a dedicated chat. Reply in Chinese. Do not use tools, inspect files, execute commands or change settings. Only converse with the user.',
         developerInstructions: request.system,
@@ -104,21 +101,24 @@ export async function* codexTextStream(
     const thread = codexRecord(started.thread);
     if (typeof thread.id !== 'string') throw new Error('Codex 没有返回可用的对话。');
     threadId = thread.id;
-    emit('turn/start');
+    // 陪伴回复不写工程任务的完成状态，否则高优先级的完成气泡会盖住这句聊天。
     const text = request.messages
       .map((message) => `${message.role === 'assistant' ? '大肥鱼' : '用户'}：${message.content}`)
       .join('\n\n');
     await client.request('turn/start', {
       threadId,
-      effort: 'low',
+      model: selected.id,
+      effort: selected.effort,
       input: [{ type: 'text', text }, ...(request.images ?? []).map((url) => ({ type: 'image', url }))],
     });
     for await (const event of queue.read()) yield event;
+  } catch (error) {
+    own.reset();
+    throw error;
   } finally {
-    if (threadId && !ended) emit('turn/end', { reason: { kind: 'aborted' } });
     signal.removeEventListener('abort', abort);
     notificationOff();
     closeOff();
-    client.close();
+    if (!connection) own.dispose();
   }
 }

@@ -15,7 +15,7 @@ function executableAt(candidate: string): string | undefined {
   }
 }
 
-/** 优先使用显式路径，其次 PATH 与桌面应用随附的 CLI；不读取登录凭据。 */
+/** 优先显式路径和当前桌面版随附 CLI，避免 PATH 残留的旧版启动器；不读取登录凭据。 */
 export function resolveCodexExecutable(env: NodeJS.ProcessEnv = process.env): string {
   if (env.DSH_PET_CODEX_PATH) {
     const explicit = executableAt(env.DSH_PET_CODEX_PATH);
@@ -23,12 +23,6 @@ export function resolveCodexExecutable(env: NodeJS.ProcessEnv = process.env): st
     throw new Error('找不到指定的 Codex 程序，请检查 DSH_PET_CODEX_PATH。');
   }
   const names = process.platform === 'win32' ? ['codex.exe', 'codex.cmd'] : ['codex'];
-  for (const directory of (env.PATH ?? '').split(delimiter).filter(Boolean)) {
-    for (const name of names) {
-      const executable = executableAt(join(directory, name));
-      if (executable) return executable;
-    }
-  }
   if (process.platform === 'win32' && env.LOCALAPPDATA) {
     const root = join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin');
     try {
@@ -39,7 +33,13 @@ export function resolveCodexExecutable(env: NodeJS.ProcessEnv = process.env): st
         if (executable) return executable;
       }
     } catch {
-      // 未安装桌面应用时仍允许上面的独立 CLI 路径。
+      // 未安装桌面应用时再尝试 PATH 中的独立 CLI。
+    }
+  }
+  for (const directory of (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)) {
+    for (const name of names) {
+      const executable = executableAt(join(directory.trim().replace(/^"(.*)"$/, '$1'), name));
+      if (executable) return executable;
     }
   }
   throw new Error('未找到本机 Codex。请先打开并登录 Codex，或设置 DSH_PET_CODEX_PATH。');

@@ -21,6 +21,8 @@ export interface PetChatUi {
 
 /** 组件与 hook 需要的 react 子集。 */
 export interface ChatPanelRuntime {
+  /** 独立外壳显式接好了 /voice/hear 才显示录音按钮。 */
+  readonly speechInput?: boolean;
   /** 创建元素；子节点写进 `props.children`。 */
   h: (type: unknown, props?: Record<string, unknown> | null) => unknown;
   /** 状态。 */

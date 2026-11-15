@@ -11,6 +11,7 @@ import { MAX_EVENTS, MAX_OUTPUT_CHARS } from './limits.ts';
 import { abortable, parseRequest } from './request.ts';
 import type { AiRuntime } from './types.ts';
 import { codexTextStream } from '../codex/transport.ts';
+import { CodexFailure } from '../codex/errors.ts';
 
 /** 本层自己写的固定文案：只有这些能原样透出给调用方。 */
 const OWN_MESSAGES: readonly string[] = [
@@ -23,6 +24,7 @@ const OWN_MESSAGES: readonly string[] = [
 function normalizeFailure(runtime: AiRuntime, controller: AbortController, error: unknown): Error {
   if (runtime.store.current().protocol === 'codex') {
     if (controller.signal.aborted) return new Error('Codex 回复已停止或超时，请重试。', { cause: error });
+    if (error instanceof CodexFailure) return error;
     return new Error('本机 Codex 暂未能回复。请在设置中检查 Codex 连接、登录状态与模型。', { cause: error });
   }
   if (isAuthenticationFailure(error)) {
@@ -68,7 +70,7 @@ export function createTextStream(
     const timer = setTimeout(abort, settings.timeoutMs);
     const transport =
       settings.protocol === 'codex'
-        ? codexTextStream(settings, request, controller.signal, runtime.codexEvents)
+        ? codexTextStream(settings, request, controller.signal, runtime.codexConnection)
         : sdkTextStream(settings, request, controller.signal, runtime.fetcher);
     const iterator = transport[Symbol.asyncIterator]();
     let emitted = 0;

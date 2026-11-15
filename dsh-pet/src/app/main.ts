@@ -7,7 +7,6 @@
  */
 
 import { createRequire } from 'node:module';
-import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,6 +25,8 @@ import { startRouter } from './router.ts';
 import { ROUTE_SEGMENT } from '../shared/constants.ts';
 import { seedCodexProfile, useCodexProfile } from '../standalone/codex/profile.ts';
 import { createCodexAttachments } from '../standalone/codex/attachments.ts';
+import { startDesktopEntry, revealExistingWindows, type StartupApp, type DpiScreen } from './startup.ts';
+import { writeStandaloneRuntime } from '../standalone/runtime-state.ts';
 
 useCodexProfile();
 
@@ -39,19 +40,16 @@ interface WebContentsLike {
     listener: (event: unknown, level: number, message: string, line: number, sourceId: string) => void,
   ): void;
 }
-interface ElectronApp {
-  setName(name: string): void;
-  getPath(name: 'appData'): string;
-  setPath(name: 'userData', path: string): void;
-  whenReady(): Promise<void>;
-  requestSingleInstanceLock(): boolean;
-  exit(code?: number): void;
+interface ElectronApp extends StartupApp {
+  quit(): void;
   on(event: 'web-contents-created', listener: (event: unknown, contents: WebContentsLike) => void): void;
   on(event: 'second-instance', listener: () => void): void;
   on(event: 'will-quit', listener: () => void): void;
 }
-const { app, session, nativeImage } = createRequire(import.meta.url)('electron') as {
+const { app, session, nativeImage, screen, BrowserWindow } = createRequire(import.meta.url)('electron') as {
   app: ElectronApp;
+  screen: DpiScreen;
+  BrowserWindow: { getAllWindows(): Array<{ isDestroyed(): boolean; isVisible(): boolean; showInactive(): void }> };
   session: { defaultSession: DesktopSession };
   nativeImage: {
     createFromBuffer(buffer: Buffer): { isEmpty(): boolean; getSize(): { width: number; height: number } };
@@ -65,19 +63,10 @@ const helperMain = join(packageRoot, 'runtime', 'electron-helper', 'main.js');
 
 const log = (message: string): void => console.log(`[dsh-pet-app] ${message}`);
 
-// 单实例锁按 userData 隔离：不能占用原版或 Codex 自己的 Chromium 配置目录。
-app.setName('Codex-BigFish');
-const electronProfile = join(app.getPath('appData'), 'codex-bigfish');
-mkdirSync(electronProfile, { recursive: true });
-app.setPath('userData', electronProfile);
-
-/** 单实例：第二次双击直接退出（共用 userData 的 Chromium profile 会互踢） */
-const locked = app.requestSingleInstanceLock();
-if (!locked) {
-  app.exit(0);
-} else {
-  await boot();
-}
+const probe = process.env.DSH_PET_DPI_PROBE === '1';
+const startup = startDesktopEntry({ app, screen, home: dshHomeDir(), probe, boot });
+// Electron 的 ready 等入口模块执行完；探测分支不能用顶层 await 再等 ready。
+if (!probe) await startup;
 
 /**
  * 启动应用。
@@ -133,12 +122,21 @@ async function boot(): Promise<void> {
       return image.isEmpty() ? undefined : image.getSize();
     }),
     authenticatedUrl: security.authenticatedUrl,
+    shutdown: () => app.quit(),
   });
 
   const server = await startRouter(routes, { security, ai, log, status, landingPage });
   port = server.port;
   const origin = `http://127.0.0.1:${port}`;
   log(`本机服务 ${origin}`);
+  const releaseRuntime = writeStandaloneRuntime(dshHomeDir(), {
+    name: 'dsh-pet-app',
+    version: packageVersion(packageRoot),
+    port,
+    token: security.token,
+    settingsUrl: security.authenticatedUrl(origin),
+    pluginRoot: packageRoot,
+  });
 
   // 先把「我自己就是应用」告诉插件，再 apply：apply 内部据此短路 spawn 与下载
   process.env.DSH_PET_IN_PROCESS = '1';
@@ -181,11 +179,15 @@ async function boot(): Promise<void> {
     delete process.env.DSH_PET_APP_TOKEN;
   }
 
-  app.on('second-instance', () => log('已有一个实例在运行，忽略本次启动'));
+  app.on('second-instance', () => {
+    revealExistingWindows(BrowserWindow.getAllWindows());
+    log('已显示正在运行的大肥鱼');
+  });
   app.on('will-quit', () => {
     // 退出前把最后一批日志刷出去（定时器最多 1s，这里显式补一次）
     void logger.flush();
     logger.dispose();
+    releaseRuntime();
     void ai.dispose();
     void context.dispose().catch(() => undefined);
     void server.close().catch(() => undefined);
@@ -224,6 +226,9 @@ function status(port: number): Record<string, unknown> {
     version: packageVersion(packageRoot),
     pid: process.pid,
     port,
+    windows: BrowserWindow.getAllWindows()
+      .filter((window) => !window.isDestroyed())
+      .map((window) => ({ visible: window.isVisible() })),
     pluginRoot: packageRoot,
     configFile: paths.userFile,
     pets: pets.map((pet) => ({ id: pet.id, name: pet.name, display: pet.display })),

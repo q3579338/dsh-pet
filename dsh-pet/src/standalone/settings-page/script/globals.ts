@@ -89,7 +89,7 @@ function voiceCard() {
     toggleRow('g-voice-whisper', '周期碎碎念也念出来', '定时生成的那句碎碎念念出来。', g.voiceWhisperEnabled, (value) => setGlobal('voiceWhisperEnabled', value)),
     toggleRow('g-voice-todo', '待办提醒也念出来', '到点的待办提醒念出来。', g.voiceTodoEnabled, (value) => setGlobal('voiceTodoEnabled', value)),
     toggleRow('g-voice-notify', '通知播报', '任务完成、出错、等你确认时念一句配置的工作状态文案；页面被藏起来也照样念。', g.voiceNotifyEnabled, (value) => setGlobal('voiceNotifyEnabled', value)),
-    selectField('g-speech-provider', '语音识别', g.speechProvider, speechProviders.map((item) => ({ value: item.id, label: item.name })), (value) => setGlobal('speechProvider', value), '按住录音后交给哪个实现转写。装了对应插件才会出现多个选项；选中的实现不可用时识别会明确报错，不会自动换一个。'),
+    selectField('g-speech-provider', '语音识别', g.speechProvider, speechProviders.map((item) => ({ value: item.id, label: item.name })), (value) => setGlobal('speechProvider', value), '按住话筒录音，松开后识别为文字；确认文字后发送给 Codex。Windows 本机识别与朗读无需 DeepSeek 或额外密钥，录音不会上传给识别服务。'),
   ]);
 }
 

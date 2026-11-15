@@ -8,6 +8,7 @@
 import { createPetChatState } from './state.ts';
 import { buildPanel } from './view.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
+import { usePanelSpeech } from './speech-input.ts';
 
 export type { ChatPanelRuntime } from './runtime.ts';
 
@@ -20,6 +21,8 @@ export type { ChatPanelRuntime } from './runtime.ts';
 export function makePetChatPanel(rt: ChatPanelRuntime): () => unknown {
   const useChatState = createPetChatState(rt);
   return function PetChatPanel(): unknown {
-    return buildPanel(rt, useChatState());
+    const state = useChatState();
+    usePanelSpeech(rt, state);
+    return buildPanel(rt, state);
   };
 }

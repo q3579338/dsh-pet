@@ -25,6 +25,7 @@ const HOST_ID = 'pet-chat-root';
  * 但两者在运行时是同一个函数。其余字段保持类型检查，缺字段会在编译期直接报错。
  */
 const runtime: ChatPanelRuntime = {
+  speechInput: true,
   h: jsx as ChatPanelRuntime['h'],
   useState,
   useEffect,

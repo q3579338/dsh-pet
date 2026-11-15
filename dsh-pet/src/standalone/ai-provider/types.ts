@@ -11,6 +11,7 @@ import { type StandaloneLogger } from '../context.ts';
 import { type BalanceResult } from '../../host/balance/index.ts';
 import type { CodexEventSink } from '../codex/events.ts';
 import type { StandaloneBalanceAuth } from '../../host/plugin/setup.ts';
+import type { CodexChatConnection } from '../codex/chat-connection.ts';
 
 /** 设置存储：`createAiConfig` 的返回形状。 */
 export type AiStore = ReturnType<typeof createAiConfig>;
@@ -69,6 +70,8 @@ export interface AiRuntime {
   active: AbortController | undefined;
   /** 本实例的 Codex 状态出口，不包含桌面聊天正文。 */
   codexEvents?: CodexEventSink;
+  /** 同一个本机服务里的聊天与模型目录复用连接。 */
+  codexConnection?: CodexChatConnection;
 }
 
 /** 独立模式 AI 服务的对外形状。 */
