@@ -1,6 +1,7 @@
 /** 原生即时语音：显式点击才打开麦克风，结束、切页或卸载立即关闭全部媒体。 */
 import { ROUTE_SEGMENT } from '../../shared/constants.ts';
 import { setLiveVoiceActive } from '../../shared/voice.ts';
+import { DEFAULT_LIVE_VOICE_STYLE, liveVoiceStyle, type LiveVoiceStyleId } from '../../shared/live-voice-style.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
 
@@ -12,10 +13,12 @@ export interface LiveVoiceView {
   readonly user: string;
   readonly pet: string;
   readonly toggle: () => void;
+  readonly styleId: LiveVoiceStyleId;
+  readonly chooseStyle: (id: string) => void;
 }
 
 /** 连接的可见状态。 */
-type LiveData = Omit<LiveVoiceView, 'toggle'>;
+type LiveData = Pick<LiveVoiceView, 'active' | 'phase' | 'message' | 'user' | 'pet'>;
 const EMPTY: LiveData = { active: false, phase: 'idle', message: '', user: '', pet: '' };
 
 /** 外部消息收窄为记录，避免解析异常中断媒体清理。 */
@@ -39,6 +42,7 @@ export function createLiveVoiceControl(options: {
   petId: string;
   changed(state: LiveData): void;
   canStart(): boolean;
+  style?(): LiveVoiceStyleId;
 }): {
   toggle(): void;
   dispose(): void;
@@ -175,7 +179,11 @@ export function createLiveVoiceControl(options: {
       await current.peer.setLocalDescription(await current.peer.createOffer());
       const response = await post(
         'start',
-        { petId: options.petId, sdp: current.peer.localDescription?.sdp },
+        {
+          petId: options.petId,
+          sdp: current.peer.localDescription?.sdp,
+          styleId: options.style?.() ?? DEFAULT_LIVE_VOICE_STYLE,
+        },
         current.abort.signal,
       );
       const result = record(await response.json());
@@ -247,6 +255,9 @@ export function createLiveVoiceControl(options: {
 /** 换宠物和卸载时结束通话，输入框草稿独立保留。 */
 export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): LiveVoiceView | undefined {
   const [data, setData] = rt.useState<LiveData>({ ...EMPTY });
+  const [styleId, setStyle] = rt.useState<LiveVoiceStyleId>(DEFAULT_LIVE_VOICE_STYLE);
+  const styleRef = rt.useRef(styleId);
+  styleRef.current = styleId;
   const control = rt.useRef<ReturnType<typeof createLiveVoiceControl> | undefined>(undefined);
   const latest = rt.useRef(state);
   latest.current = state;
@@ -256,6 +267,7 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
     const next = createLiveVoiceControl({
       petId: state.petId,
       changed: setData,
+      style: () => styleRef.current,
       canStart: () => {
         const mic = latest.current.draftRef.current
           ?.closest('.pet-chat-composer')
@@ -269,5 +281,14 @@ export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): 
       if (control.current === next) control.current = undefined;
     };
   }, [state.petId]);
-  return rt.speechInput ? { ...data, toggle: () => control.current?.toggle() } : undefined;
+  return rt.speechInput
+    ? {
+        ...data,
+        styleId,
+        chooseStyle: (id) => {
+          if (!data.active && liveVoiceStyle(id)) setStyle(id as LiveVoiceStyleId);
+        },
+        toggle: () => control.current?.toggle(),
+      }
+    : undefined;
 }

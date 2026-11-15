@@ -504,6 +504,8 @@ export const PANEL_CSS = `
 
 .pet-chat-mic { flex: 0 0 auto; }
 .pet-chat-live-button { flex: 0 0 auto; }
+.pet-chat-live-style { display: inline-flex; align-items: center; gap: 4px; font: var(--dsw-font-xxs-12); color: var(--dsw-alias-label-secondary); }
+.pet-chat-live-style select { max-width: 140px; min-width: 0; padding: 4px; border: 1px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); color: var(--dsw-alias-label-primary); background: var(--dsw-specific-input-major); font: inherit; }
 .pet-chat-live-button[aria-pressed="true"] { color: var(--dsw-alias-label-error); }
 .pet-chat-live { margin-top: 4px; padding: 10px; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-interactive-bg-hover); font: var(--dsw-font-xxs-12); line-height: 1.6; overflow-wrap: anywhere; max-height: 12em; overflow-y: auto; }
 .pet-chat-live-status { font-weight: 600; }

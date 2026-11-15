@@ -2460,6 +2460,11 @@ paths:
               properties:
                 petId: { type: string }
                 sdp: { type: string, maxLength: 65536 }
+                styleId:
+                  type: string
+                  enum: [starbell, moon, sugarbud, natural]
+                  default: starbell
+                  description: 原生语调、节奏与语气风格，连接前选择；不增加文字转语音步骤
       responses:
         "200":
           description: 成功返回 ok、sessionId、answerSdp；失败返回 ok:false 和安全的 message

@@ -10,6 +10,7 @@ import type { Key } from './locales/index.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState, ConfirmKind, DraftKeyEvent } from './types.ts';
 import type { LiveVoiceView } from './live-voice.ts';
+import { LIVE_VOICE_STYLES } from '../../shared/live-voice-style.ts';
 
 /**
  * 已删宠物残留历史的提示条：显示数量并给一个「清理」。
@@ -303,6 +304,24 @@ export function composerNode(
           }),
           h('span', { className: 'pet-chat-composer-spacer' }),
           live
+            ? h('label', {
+                className: 'pet-chat-live-style',
+                children: [
+                  h('span', { children: '语音风格' }),
+                  h('select', {
+                    'aria-label': '即时语音风格',
+                    title: '连接前选择；本次窗口内保留。保持原生即时语音，调整语调、节奏和语气。',
+                    value: live.styleId,
+                    disabled: live.active,
+                    onChange: (event: { target: { value: string } }) => live.chooseStyle(event.target.value),
+                    children: LIVE_VOICE_STYLES.map((style) =>
+                      h('option', { key: style.id, value: style.id, children: style.name }),
+                    ),
+                  }),
+                ],
+              })
+            : null,
+          live
             ? h('button', {
                 type: 'button',
                 className: 'pet-chat-tool pet-chat-live-button',
@@ -347,7 +366,7 @@ export function composerNode(
                 ? h('div', {
                     className: 'pet-chat-live-note',
                     children:
-                      '麦克风正在使用，语音发送至 Codex/OpenAI。即时语音使用 Codex 原生音色，普通聊天继续用所选音色。本次字幕不写入普通聊天记忆。',
+                      '麦克风正在使用，语音发送至 Codex/OpenAI。所选风格调整原生语音的语调、节奏和语气，普通聊天音色单独保留。本次字幕不写入普通聊天记忆。',
                   })
                 : null,
               live.user ? h('div', { className: 'pet-chat-live-user', children: '你：' + live.user }) : null,

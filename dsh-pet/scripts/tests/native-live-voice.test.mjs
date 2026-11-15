@@ -83,7 +83,7 @@ test(
         const evidence = resolve(env.DSH_PET_NATIVE_LIVE_EVIDENCE);
         await mkdir(evidence, { recursive: true });
         await writeFile(join(evidence, 'native-live.log'), output);
-        for (const file of ['result.json', 'live-offscreen.png']) {
+        for (const file of ['result.json', 'live-offscreen.png', 'native-sweet-voice.wav']) {
           const data = await readFile(join(run, file)).catch(() => null);
           if (data) await writeFile(join(evidence, file), data);
         }

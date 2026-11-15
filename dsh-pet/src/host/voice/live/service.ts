@@ -6,12 +6,13 @@ import { CodexClient, codexRecord } from '../../../standalone/codex/client.ts';
 import { companionThreadConfig, parseChatModels, selectChatModel } from '../../../standalone/codex/chat-policy.ts';
 import { readCodexSpeechIdentity } from '../codex/auth.ts';
 import { createCodexLiveCall, LiveVoiceError } from './http.ts';
+import { DEFAULT_LIVE_VOICE_STYLE, liveVoiceStyle } from '../../../shared/live-voice-style.ts';
 
 /** 页面拿不到账号令牌，只拿到这次协商必需的 SDP 和本地会话编号。 */
 export type LiveStartResult = { ok: true; sessionId: string; answerSdp: string } | { ok: false; message: string };
 /** 结束操作幂等；编号不匹配时不会影响其他通话。 */
 export interface LiveVoiceService {
-  start(petId: string, sdp: string, signal?: AbortSignal): Promise<LiveStartResult>;
+  start(petId: string, sdp: string, signal?: AbortSignal, styleId?: string): Promise<LiveStartResult>;
   touch(sessionId: string): boolean;
   stop(sessionId: string): Promise<void>;
   dispose(): void;
@@ -77,9 +78,11 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
     }
   };
   return {
-    async start(petId, sdp, signal) {
+    async start(petId, sdp, signal, styleId = DEFAULT_LIVE_VOICE_STYLE) {
       if (signal?.aborted) return { ok: false, message: '即时语音已停止。' };
       const settings = deps.settings(petId);
+      const style = liveVoiceStyle(styleId);
+      if (!style) return { ok: false, message: '没有找到所选的即时语音风格，请重新选择。' };
       if (!settings || !sdp.startsWith('v=0') || sdp.length > 65536)
         return { ok: false, message: '即时语音连接参数无效。' };
       if (active) return { ok: false, message: '已有即时语音正在连接或通话，请先结束。' };
@@ -129,7 +132,11 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
           sdp,
           threadId,
           sessionId: room.id,
-          prompt: settings.prompt + '\n只进行简短自然的中文语音闲聊，不操作文件，不使用工具，不发起任务委托。',
+          prompt:
+            settings.prompt +
+            '\n【声音与节奏】' +
+            style.instructions +
+            '\n只进行简短自然的中文语音闲聊，不操作文件，不使用工具，不发起任务委托。不解释声音设定，直接用所选声音说话。',
           model: model.id,
           effort: model.effort,
           identity: auth,

@@ -28,7 +28,9 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
     if (rest === 'voice/live/start') {
       if (typeof value.petId !== 'string' || typeof value.sdp !== 'string')
         return failResult('bad-request', '缺少桌宠或连接参数。');
-      return okResult(await deps.liveVoice.start(value.petId, value.sdp, signal));
+      if (value.styleId !== undefined && typeof value.styleId !== 'string')
+        return failResult('bad-request', '即时语音风格无效。');
+      return okResult(await deps.liveVoice.start(value.petId, value.sdp, signal, value.styleId as string | undefined));
     }
     if (typeof value.sessionId !== 'string' || !/^[\w-]{1,200}$/u.test(value.sessionId))
       return failResult('bad-request', '语音会话编号无效。');

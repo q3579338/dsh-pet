@@ -24,6 +24,7 @@ function fixture() {
       if (method === 'model/list')
         return { data: [{ model: 'gpt-6-luna', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
       if (method === 'thread/start') return { thread: { id: 'test-thread' } };
+      if (method === 'thread/realtime/listVoices') return { voices: { v3: ['breeze', 'maple'] } };
       return {};
     },
     onNotification: (listener: (value: CodexNotification) => void) => {
@@ -81,6 +82,7 @@ test('临时只读会话只接 existingCall，错误编号不能结束或续租�
     assert.equal((thread.config as Record<string, unknown>)['features.shell_tool'], false);
     const realtime = f.requests.find((value) => value.method === 'thread/realtime/start')!.params;
     assert.deepEqual(realtime.transport, { type: 'existingCall', callId: 'test-call' });
+    assert.equal(realtime.voice, undefined, '音色在 WebRTC 创建时设置，existingCall 不重新覆盖');
     assert.equal(realtime.includeStartupContext, false);
     assert.equal(f.service.touch('wrong'), false);
     await f.service.stop('wrong');
@@ -122,6 +124,8 @@ test('未知宠物和无效协商不启动连接；异常正文和凭据不返�
     assert.equal((await f.service.start('unknown', 'v=0')).ok, false);
     assert.equal((await f.service.start('main', 'invalid')).ok, false);
     assert.equal(f.requests.length, 0);
+    assert.equal((await f.service.start('main', 'v=0', undefined, 'unknown')).ok, false);
+    assert.equal(f.requests.length, 0);
     const failing = createLiveVoiceService({
       ...f.deps,
       createCall: async () => {
@@ -158,6 +162,7 @@ test('协商只请求固定官方地址；账号凭据仅在请求头，失败�
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-only-token');
     assert.ok(!String(init?.body).includes('test-only-token'));
     assert.equal(JSON.parse(String(init?.body)).session.model, 'gpt-live-1.1-codex');
+    assert.equal(JSON.parse(String(init?.body)).session.audio, undefined);
     return new Response('v=0\r\nanswer', { status: 201, headers: { location: '/calls/test-call' } });
   });
   assert.equal(result.callId, 'test-call');

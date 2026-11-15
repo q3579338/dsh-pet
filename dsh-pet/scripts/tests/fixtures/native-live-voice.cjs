@@ -9,6 +9,19 @@ const { app } = electron;
 const run = process.env.FISH_TEST_RUN;
 const RealWindow = electron.BrowserWindow;
 const report = { offscreen: true, shown: false };
+report.nativeCalls = [];
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  if (String(url).startsWith('https://chatgpt.com/backend-api/wham/realtime/calls') && typeof init?.body === 'string') {
+    const value = JSON.parse(init.body);
+    report.nativeCalls.push({
+      voice: value.session?.audio?.output?.voice,
+      model: value.session?.model,
+      hasStyle: value.session?.instructions?.includes('【声音与节奏】') === true,
+    });
+  }
+  return originalFetch(url, init);
+};
 let closeChoice = 0;
 const HiddenWindow = new Proxy(RealWindow, {
   construct(target, args) {
@@ -84,6 +97,11 @@ const guard = setTimeout(() => {
     }
     report.hasButton = await js("!!document.querySelector('.pet-chat-live-button')");
     assert.equal(report.hasButton, true);
+    report.stylePicker = await js(
+      "({value:document.querySelector('.pet-chat-live-style select').value,choices:[...document.querySelectorAll('.pet-chat-live-style option')].map(option=>option.value)})",
+    );
+    assert.equal(report.stylePicker.value, 'starbell');
+    assert.equal(report.stylePicker.choices.length, 4);
     await js(`(async()=>{
       window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0};
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
@@ -129,7 +147,13 @@ const guard = setTimeout(() => {
     report.live = await js(`(async()=>{
       if(window.__recorder?.state!=='inactive')await new Promise(done=>{__recorder.onstop=done;__recorder.stop();});
       const bytes=await new Blob(__live.blobs).arrayBuffer();const recordedBytes=bytes.byteLength;let peak=0;
-      if(bytes.byteLength){const decoded=await new OfflineAudioContext(1,1,48000).decodeAudioData(bytes);for(const value of decoded.getChannelData(0))peak=Math.max(peak,Math.abs(value));}
+      if(bytes.byteLength){
+        const decoded=await new OfflineAudioContext(1,1,48000).decodeAudioData(bytes);const pcm=decoded.getChannelData(0);for(const value of pcm)peak=Math.max(peak,Math.abs(value));
+        const wav=new ArrayBuffer(44+pcm.length*2);const view=new DataView(wav);const tag=(offset,value)=>{for(let i=0;i<value.length;i++)view.setUint8(offset+i,value.charCodeAt(i));};
+        tag(0,'RIFF');view.setUint32(4,36+pcm.length*2,true);tag(8,'WAVEfmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,decoded.sampleRate,true);view.setUint32(28,decoded.sampleRate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);tag(36,'data');view.setUint32(40,pcm.length*2,true);
+        for(let i=0;i<pcm.length;i++)view.setInt16(44+i*2,Math.round(Math.max(-1,Math.min(1,pcm[i]))*32767),true);
+        let binary='';for(const value of new Uint8Array(wav))binary+=String.fromCharCode(value);window.__nativeVoicePreview=btoa(binary);
+      }
       return {user:document.querySelector('.pet-chat-live-user')?.textContent,pet:document.querySelector('.pet-chat-live-pet')?.textContent,played:__live.played,recordedBytes,peak,inputs:__live.inputs,turns:__live.turns,requests:__live.requests,draft:document.querySelector('textarea.pet-chat-input').value,microphoneDisabled:document.querySelector('.pet-chat-mic').disabled};
     })()`);
     assert.match(report.live.user, /测试/);
@@ -137,6 +161,10 @@ const guard = setTimeout(() => {
     assert.ok(report.live.played > 0);
     assert.ok(report.live.peak > 0.001);
     assert.ok(report.live.inputs >= 2 && report.live.turns >= 2);
+    fs.writeFileSync(
+      path.join(run, 'native-sweet-voice.wav'),
+      Buffer.from(await js('window.__nativeVoicePreview'), 'base64'),
+    );
     assert.equal(report.live.draft, '保留这条草稿');
     assert.equal(report.live.microphoneDisabled, true);
     chat.setSize(400, 800);
@@ -155,10 +183,14 @@ const guard = setTimeout(() => {
     const state = await (await fetch(origin + '/dsh-pet-7340/state', { headers })).json();
     report.hostReleased = state.sections.voiceSession.data.active === false;
     assert.equal(report.hostReleased, true);
+    await js(
+      "(()=>{const select=document.querySelector('.pet-chat-live-style select');select.value='moon';select.dispatchEvent(new Event('change',{bubbles:true}));})()",
+    );
+    await wait(100);
     await js("document.querySelector('.pet-chat-live-button').click()");
-    for (let i = 0; i < 30; i++) {
-      if (await js('__live.requests===2')) break;
-      await wait(50);
+    for (let i = 0; i < 250; i++) {
+      if (await js("__live.peers[1]?.connectionState==='connected'")) break;
+      await wait(100);
     }
     await js("document.dispatchEvent(new Event('pet-stop-live-voice'))");
     await wait(300);
@@ -166,6 +198,9 @@ const guard = setTimeout(() => {
       "__live.tracks.every(track=>track.readyState==='ended')&&__live.peers.every(peer=>peer.connectionState==='closed')",
     );
     assert.equal(report.cancelled, true);
+    assert.equal(report.nativeCalls[0]?.voice, undefined);
+    assert.equal(report.nativeCalls[0]?.hasStyle, true);
+    assert.equal(report.nativeCalls[1]?.hasStyle, true);
     await js('__ctx.close()');
     const memoryFile = path.join(run, 'home/dsh-pet/memory.json');
     report.memoryUntouched = !fs.existsSync(memoryFile) || fs.readFileSync(memoryFile, 'utf8').trim() === '{}';
