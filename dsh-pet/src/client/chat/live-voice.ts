@@ -1,0 +1,273 @@
+/** 原生即时语音：显式点击才打开麦克风，结束、切页或卸载立即关闭全部媒体。 */
+import { ROUTE_SEGMENT } from '../../shared/constants.ts';
+import { setLiveVoiceActive } from '../../shared/voice.ts';
+import type { ChatPanelRuntime } from './runtime.ts';
+import type { ChatPanelState } from './types.ts';
+
+/** 对话区只显示本次最近一轮字幕，不写入普通聊天存档。 */
+export interface LiveVoiceView {
+  readonly active: boolean;
+  readonly phase: 'idle' | 'connecting' | 'live';
+  readonly message: string;
+  readonly user: string;
+  readonly pet: string;
+  readonly toggle: () => void;
+}
+
+/** 连接的可见状态。 */
+type LiveData = Omit<LiveVoiceView, 'toggle'>;
+const EMPTY: LiveData = { active: false, phase: 'idle', message: '', user: '', pet: '' };
+
+/** 外部消息收窄为记录，避免解析异常中断媒体清理。 */
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+/** 单次字幕文本上限；任意音频和其他事件字段不送进页面。 */
+function text(value: unknown): string {
+  if (typeof value === 'string') return value.slice(0, 6000);
+  if (Array.isArray(value))
+    return value
+      .map((item) => text(record(item).text))
+      .join('')
+      .slice(0, 6000);
+  return '';
+}
+
+/** 连接控制器的最小宿主，不依赖 React，方便验证真实媒体和取消路径。 */
+export function createLiveVoiceControl(options: {
+  petId: string;
+  changed(state: LiveData): void;
+  canStart(): boolean;
+}): {
+  toggle(): void;
+  dispose(): void;
+} {
+  type Call = {
+    abort: AbortController;
+    peer: RTCPeerConnection;
+    audio: HTMLAudioElement;
+    stream?: MediaStream;
+    sessionId?: string;
+    heartbeat?: ReturnType<typeof setInterval>;
+    timeout?: ReturnType<typeof setTimeout>;
+    disconnect?: ReturnType<typeof setTimeout>;
+  };
+  let call: Call | undefined;
+  let state: LiveData = { ...EMPTY };
+  let disposed = false;
+  const paint = (patch: Partial<LiveData>): void => {
+    state = { ...state, ...patch };
+    if (!disposed) options.changed(state);
+  };
+  const post = (path: string, body: unknown, signal?: AbortSignal, keepalive = false): Promise<Response> =>
+    fetch(ROUTE_SEGMENT + '/voice/live/' + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+      keepalive,
+    });
+  const stop = (message = '即时语音已结束。'): void => {
+    const old = call;
+    call = undefined;
+    if (old) {
+      clearInterval(old.heartbeat);
+      clearTimeout(old.timeout);
+      clearTimeout(old.disconnect);
+      old.abort.abort();
+      old.stream?.getTracks().forEach((track) => track.stop());
+      old.peer.close();
+      old.audio.pause();
+      old.audio.srcObject = null;
+      old.audio.remove();
+      if (old.sessionId) void post('stop', { sessionId: old.sessionId }, undefined, true).catch(() => {});
+    }
+    setLiveVoiceActive(false);
+    paint({ active: false, phase: 'idle', message });
+  };
+  const start = async (): Promise<void> => {
+    if (disposed || call) return;
+    if (!options.canStart()) {
+      paint({ message: '请先结束按住说话或等待当前回复。' });
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection === 'undefined') {
+      paint({ message: '当前窗口不支持即时语音，请使用桌宠原生聊天窗口。' });
+      return;
+    }
+    const current: Call = {
+      abort: new AbortController(),
+      peer: new RTCPeerConnection(),
+      audio: document.createElement('audio'),
+    };
+    call = current;
+    setLiveVoiceActive(true);
+    paint({ ...EMPTY, active: true, phase: 'connecting', message: '正在连接 Codex，即时语音可随时取消…' });
+    current.timeout = setTimeout(() => {
+      if (call === current) stop('即时语音连接超时，请重试。');
+    }, 35000);
+    const relevant = (): boolean => call === current && !current.abort.signal.aborted;
+    try {
+      const config = fetch(ROUTE_SEGMENT + '/config', { signal: current.abort.signal })
+        .then((response) => response.json())
+        .catch(() => null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      });
+      if (!relevant()) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      current.stream = stream;
+      for (const track of stream.getAudioTracks()) {
+        track.enabled = false;
+        track.onended = () => {
+          if (relevant()) stop('麦克风已断开，即时语音已结束。');
+        };
+        current.peer.addTrack(track, stream);
+      }
+      const main = record(record(await config).main);
+      const volume = typeof main.voiceVolume === 'number' ? main.voiceVolume : 1;
+      current.audio.volume = Math.min(1, Math.max(0, volume));
+      current.audio.hidden = true;
+      document.body.append(current.audio);
+      const channel = current.peer.createDataChannel('oai-events');
+      channel.onmessage = (event: MessageEvent<unknown>) => {
+        if (!relevant() || typeof event.data !== 'string' || event.data.length > 1000000) return;
+        try {
+          const value = record(JSON.parse(event.data));
+          const item = record(value.item);
+          const turn = record(value.turn);
+          if (value.type === 'input_transcript.added') paint({ user: text(item.text) });
+          if (value.type === 'output_transcript.added') paint({ pet: (state.pet + text(item.text)).slice(-6000) });
+          if (value.type === 'turn.created' && turn.role === 'assistant') paint({ pet: '' });
+          if (value.type === 'turn.done' && turn.role === 'assistant' && text(turn.transcript))
+            paint({ pet: text(turn.transcript) });
+          if (value.type === 'error') stop('Codex 即时语音已中断，请重试。');
+        } catch {
+          /* 忽略无法识别的控制事件，不显示内部报错或音频载荷。 */
+        }
+      };
+      current.peer.ontrack = (event) => {
+        if (!relevant()) return;
+        current.audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+        void current.audio.play().catch(() => {
+          if (relevant()) stop('回复声音无法播放，请结束后重新开启即时语音。');
+        });
+      };
+      current.peer.onconnectionstatechange = () => {
+        if (!relevant()) return;
+        const connection = current.peer.connectionState;
+        if (connection === 'connected') {
+          clearTimeout(current.disconnect);
+          if (current.sessionId) {
+            clearTimeout(current.timeout);
+            paint({ phase: 'live', message: '正在即时语音，可以直接说话，也可以打断回复。' });
+          }
+        } else if (connection === 'failed' || connection === 'closed') stop('语音连接已断开，请重试。');
+        else if (connection === 'disconnected')
+          current.disconnect = setTimeout(() => {
+            if (relevant()) stop('语音网络已断开，请重试。');
+          }, 5000);
+      };
+      await current.peer.setLocalDescription(await current.peer.createOffer());
+      const response = await post(
+        'start',
+        { petId: options.petId, sdp: current.peer.localDescription?.sdp },
+        current.abort.signal,
+      );
+      const result = record(await response.json());
+      // 即使取消晚于服务端建连成功，也必须交回本次编号并结束，不能留下后台麦克风或连接。
+      if (typeof result.sessionId === 'string') current.sessionId = result.sessionId;
+      if (!relevant()) {
+        if (current.sessionId) void post('stop', { sessionId: current.sessionId }, undefined, true).catch(() => {});
+        return;
+      }
+      if (result.ok !== true || typeof result.answerSdp !== 'string' || !current.sessionId) {
+        stop(typeof result.message === 'string' ? result.message : 'Codex 未能连接即时语音，请重试。');
+        return;
+      }
+      await current.peer.setRemoteDescription({ type: 'answer', sdp: result.answerSdp });
+      if (!relevant()) return;
+      current.stream.getAudioTracks().forEach((track) => {
+        track.enabled = true;
+      });
+      current.heartbeat = setInterval(() => {
+        void post('touch', { sessionId: current.sessionId }, current.abort.signal)
+          .then((response) => response.json())
+          .then((value) => {
+            if (relevant() && record(value).ok !== true) stop('即时语音已结束，点击按钮可重新开始。');
+          })
+          .catch(() => {
+            if (relevant()) stop('语音网络暂时不可用，请重试。');
+          });
+      }, 15000);
+      if (current.peer.connectionState === 'connected') {
+        clearTimeout(current.timeout);
+        paint({ phase: 'live', message: '正在即时语音，可以直接说话，也可以打断回复。' });
+      }
+    } catch (error) {
+      if (!relevant()) return;
+      const name = error instanceof Error ? error.name : '';
+      stop(
+        name === 'NotAllowedError'
+          ? '麦克风权限未允许，请在系统设置中允许桌宠使用麦克风。'
+          : name === 'NotFoundError'
+            ? '没有找到麦克风，请连接后重试。'
+            : name === 'NotReadableError'
+              ? '麦克风正被占用或无法打开，请检查后重试。'
+              : '即时语音连接失败，请检查网络后重试。',
+      );
+    }
+  };
+  const pageStop = (): void => stop();
+  const hidden = (): void => {
+    if (document.hidden) stop();
+  };
+  window.addEventListener('pagehide', pageStop);
+  document.addEventListener('visibilitychange', hidden);
+  document.addEventListener('pet-stop-live-voice', pageStop);
+  return {
+    toggle() {
+      if (call) stop();
+      else void start();
+    },
+    dispose() {
+      disposed = true;
+      stop();
+      window.removeEventListener('pagehide', pageStop);
+      document.removeEventListener('visibilitychange', hidden);
+      document.removeEventListener('pet-stop-live-voice', pageStop);
+    },
+  };
+}
+
+/** 换宠物和卸载时结束通话，输入框草稿独立保留。 */
+export function usePanelLiveVoice(rt: ChatPanelRuntime, state: ChatPanelState): LiveVoiceView | undefined {
+  const [data, setData] = rt.useState<LiveData>({ ...EMPTY });
+  const control = rt.useRef<ReturnType<typeof createLiveVoiceControl> | undefined>(undefined);
+  const latest = rt.useRef(state);
+  latest.current = state;
+  rt.useEffect(() => {
+    if (!rt.speechInput) return;
+    setData({ ...EMPTY });
+    const next = createLiveVoiceControl({
+      petId: state.petId,
+      changed: setData,
+      canStart: () => {
+        const mic = latest.current.draftRef.current
+          ?.closest('.pet-chat-composer')
+          ?.querySelector<HTMLButtonElement>('.pet-chat-mic');
+        return !latest.current.busy && !!latest.current.petId && !mic?.disabled && !mic?.dataset.hear;
+      },
+    });
+    control.current = next;
+    return () => {
+      next.dispose();
+      if (control.current === next) control.current = undefined;
+    };
+  }, [state.petId]);
+  return rt.speechInput ? { ...data, toggle: () => control.current?.toggle() } : undefined;
+}

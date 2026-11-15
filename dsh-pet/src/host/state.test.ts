@@ -16,7 +16,7 @@ import assert from 'node:assert/strict';
 import { MAX_STATE_WAIT_MS, parseStateWaitQuery, PollStateStore } from './state.ts';
 
 describe('PollStateStore —— 初始形态', () => {
-  test('七个全局叶子都是 {counter:0, data:null}（0 = 从未写过，前端首拉当基线）', () => {
+  test('八个全局叶子都是 {counter:0, data:null}（0 = 从未写过，前端首拉当基线）', () => {
     const s = new PollStateStore().read();
     assert.deepEqual(Object.keys(s.sections).sort(), [
       'balance',
@@ -25,6 +25,7 @@ describe('PollStateStore —— 初始形态', () => {
       'focusSession',
       'menu',
       'notify',
+      'voiceSession',
       'workStatus',
     ]);
     for (const leaf of Object.values(s.sections)) assert.deepEqual(leaf, { counter: 0, data: null });

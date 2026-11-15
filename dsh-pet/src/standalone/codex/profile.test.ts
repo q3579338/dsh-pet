@@ -35,7 +35,7 @@ test('Codex first launch preserves the original character and existing user choi
     const updated = JSON.parse(readFileSync(paths.userFile, 'utf8'));
     assert.deepEqual(updated.pets, JSON.parse(chosen).pets);
     if (process.platform === 'win32') {
-      assert.equal(updated.speechProvider, 'windows');
+      assert.equal(updated.speechProvider, 'codex');
       assert.equal(updated.voiceName, 'edge/zh-CN-XiaoyiNeural');
       assert.equal(updated.voiceEnabled, true);
     }

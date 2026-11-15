@@ -74,6 +74,7 @@ function populateAi(data) {
   byId('deepseekApiKey').value = '';
   byId('deepseekApiKey').disabled = false;
   syncProtocolFields();
+  markDirty(false, 'ai');
 }
 
 /** 把余额结果翻成一行可读文案；失败一律说明原因，不显示伪造数字。 */
@@ -246,6 +247,7 @@ function wireSave(form, save, status) {
 }
 
 function wireAiPanel() {
+  for (const kind of ['input', 'change']) byId('settings').addEventListener(kind, () => markDirty(true, 'ai'));
   wireModelPicker();
   const status = byId('status');
   wireKeyDelete(status);

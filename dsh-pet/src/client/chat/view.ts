@@ -9,6 +9,7 @@ import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
 import { composerNode, confirmNode, orphansNode, personaNode, toolsNode } from './view-node.ts';
 import { roundNode } from './view-message.ts';
+import type { LiveVoiceView } from './live-voice.ts';
 
 /** 宠物标签条：点击切换对话。 */
 function tabsNode(h: ChatPanelRuntime['h'], state: ChatPanelState): unknown {
@@ -123,7 +124,7 @@ function previewNode(rt: ChatPanelRuntime, state: ChatPanelState): unknown {
  * @param state - 当前状态与动作。
  * @returns 面板根元素。
  */
-export function buildPanel(rt: ChatPanelRuntime, state: ChatPanelState): unknown {
+export function buildPanel(rt: ChatPanelRuntime, state: ChatPanelState, live?: LiveVoiceView): unknown {
   const { h } = rt;
   return h('div', {
     className: 'pet-chat',
@@ -140,7 +141,7 @@ export function buildPanel(rt: ChatPanelRuntime, state: ChatPanelState): unknown
       confirmNode(rt, state),
       previewNode(rt, state),
       state.error === '' ? null : h('div', { className: 'pet-chat-error', role: 'alert', children: state.error }),
-      composerNode(h, rt.t, state, rt.speechInput === true),
+      composerNode(h, rt.t, state, rt.speechInput === true, live),
     ],
   });
 }

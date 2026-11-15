@@ -148,6 +148,7 @@ async function setupPage(search = ''): Promise<Page> {
   const requests: RecordedRequest[] = [];
   let stripped = '';
   runInNewContext(settingsScript, {
+    Event,
     URLSearchParams,
     setTimeout,
     clearTimeout,
@@ -161,6 +162,7 @@ async function setupPage(search = ''): Promise<Page> {
       querySelectorAll: () => [],
       addEventListener() {},
       removeEventListener() {},
+      dispatchEvent() {},
       body,
     },
     location: { hash: '#token=process-capability', pathname: '/standalone-ai/', search },

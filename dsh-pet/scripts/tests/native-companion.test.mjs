@@ -29,7 +29,7 @@ test(
         voiceEnabled: true,
         voiceNotifyEnabled: true,
         voiceName: 'edge/zh-CN-XiaoyiNeural',
-        speechProvider: 'windows',
+        speechProvider: 'codex',
         clickSoundEnabled: false,
       }),
     );
@@ -88,6 +88,9 @@ test(
       assert.equal(report.settingsPreview.draftOnly, true);
       assert.equal(report.settingsPreview.stoppedOnChange, true);
       assert.equal(report.settingsPreview.savedOriginal, true);
+      assert.equal(report.closeConfirmation.cancelKeptWindow, true);
+      assert.equal(report.aiSaveClearsDirty, true);
+      assert.equal(report.closeConfirmation.discardClosedWindow, true);
       assert.ok(!report.responses.some((item) => item.status === 401 || item.status === 403));
     } finally {
       if (child.exitCode === null) child.kill();

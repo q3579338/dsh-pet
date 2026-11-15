@@ -1,0 +1,169 @@
+/** 即时语音的所有权与错误边界：只结束自己那通，不写普通聊天记忆，不泄露登录。 */
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, sep } from 'node:path';
+import type { CodexNotification } from '../../../standalone/codex/client.ts';
+import { createLiveVoiceService } from './service.ts';
+import { createCodexLiveCall } from './http.ts';
+
+/** 用受控客户端替换进程与网络，保留真实会话配置和结束流程。 */
+function fixture() {
+  const home = mkdtempSync(join(tmpdir(), 'codex-voice-unit-'));
+  const changes: boolean[] = [];
+  const requests: { method: string; params: Record<string, unknown> }[] = [];
+  let closed = 0;
+  let notify: ((value: CodexNotification) => void) | undefined;
+  let onClose: ((error: Error) => void) | undefined;
+  const client = {
+    initialize: async () => {},
+    request: async (method: string, params: Record<string, unknown>) => {
+      requests.push({ method, params });
+      if (method === 'config/read') return { config: { mcp_servers: { example: {} } } };
+      if (method === 'model/list')
+        return { data: [{ model: 'gpt-6-luna', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
+      if (method === 'thread/start') return { thread: { id: 'test-thread' } };
+      return {};
+    },
+    onNotification: (listener: (value: CodexNotification) => void) => {
+      notify = listener;
+      return () => {
+        notify = undefined;
+      };
+    },
+    onClose: (listener: (error: Error) => void) => {
+      onClose = listener;
+      return () => {
+        onClose = undefined;
+      };
+    },
+    close: () => {
+      closed++;
+      onClose?.(new Error('test connection closed'));
+    },
+  };
+  const deps = {
+    home,
+    settings: (id: string) => (id === 'main' ? { prompt: '你是大肥鱼。', model: 'gpt-6-luna' } : undefined),
+    activeChanged: (active: boolean) => changes.push(active),
+    createClient: () => client,
+    identity: async () => ({ token: 'test-only-token' }),
+    createCall: async () => ({ answerSdp: 'v=0\r\nanswer', callId: 'test-call' }),
+  };
+  const service = createLiveVoiceService(deps);
+  return {
+    service,
+    deps,
+    requests,
+    changes,
+    closed: () => closed,
+    notify: (method: string) => notify?.({ method, params: { threadId: 'test-thread' } }),
+    cleanup: () => {
+      service.dispose();
+      assert.ok(resolve(home).startsWith(resolve(tmpdir()) + sep));
+      rmSync(home, { recursive: true, force: true });
+    },
+  };
+}
+
+test('临时只读会话只接 existingCall，错误编号不能结束或续租；停止幂等', async () => {
+  const f = fixture();
+  try {
+    const result = await f.service.start('main', 'v=0\r\noffer');
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const thread = f.requests.find((value) => value.method === 'thread/start')!.params;
+    assert.equal(thread.ephemeral, true);
+    assert.equal(thread.sandbox, 'read-only');
+    assert.equal(thread.approvalPolicy, 'never');
+    assert.equal((thread.config as Record<string, unknown>)['mcp_servers.example.enabled'], false);
+    assert.equal((thread.config as Record<string, unknown>)['features.shell_tool'], false);
+    const realtime = f.requests.find((value) => value.method === 'thread/realtime/start')!.params;
+    assert.deepEqual(realtime.transport, { type: 'existingCall', callId: 'test-call' });
+    assert.equal(realtime.includeStartupContext, false);
+    assert.equal(f.service.touch('wrong'), false);
+    await f.service.stop('wrong');
+    assert.equal(f.closed(), 0);
+    assert.equal(f.service.touch(result.sessionId), true);
+    await f.service.stop(result.sessionId);
+    await f.service.stop(result.sessionId);
+    assert.equal(f.closed(), 1);
+    assert.equal(f.service.touch(result.sessionId), false);
+    assert.deepEqual(f.changes, [true, false]);
+    assert.equal(f.requests.filter((value) => value.method === 'thread/realtime/stop').length, 1);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('并发打开不会覆盖已有连接；取消连接与远端关闭都会归还占用', async () => {
+  const f = fixture();
+  try {
+    const controller = new AbortController();
+    const first = f.service.start('main', 'v=0', controller.signal);
+    assert.equal((await f.service.start('main', 'v=0')).ok, false);
+    controller.abort();
+    assert.equal((await first).ok, false);
+    assert.equal(f.changes[f.changes.length - 1], false);
+    const next = await f.service.start('main', 'v=0');
+    assert.equal(next.ok, true);
+    f.notify('thread/realtime/closed');
+    assert.equal(f.changes[f.changes.length - 1], false);
+    if (next.ok) assert.equal(f.service.touch(next.sessionId), false);
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('未知宠物和无效协商不启动连接；异常正文和凭据不返回页面', async () => {
+  const f = fixture();
+  try {
+    assert.equal((await f.service.start('unknown', 'v=0')).ok, false);
+    assert.equal((await f.service.start('main', 'invalid')).ok, false);
+    assert.equal(f.requests.length, 0);
+    const failing = createLiveVoiceService({
+      ...f.deps,
+      createCall: async () => {
+        throw Error('Bearer test-only-secret');
+      },
+    });
+    const result = await failing.start('main', 'v=0');
+    assert.equal(result.ok, false);
+    assert.ok(!JSON.stringify(result).includes('secret'));
+    assert.equal(f.changes[f.changes.length - 1], false);
+    failing.dispose();
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('协商只请求固定官方地址；账号凭据仅在请求头，失败正文不会回显', async () => {
+  const input = {
+    sdp: 'v=0',
+    threadId: 'test-thread',
+    sessionId: 'test-session',
+    prompt: '大肥鱼',
+    model: 'gpt-6-luna',
+    effort: 'low',
+    identity: { token: 'test-only-token', accountId: 'test-account' },
+    signal: new AbortController().signal,
+  };
+  const result = await createCodexLiveCall(input, async (url, init) => {
+    assert.equal(
+      String(url),
+      'https://chatgpt.com/backend-api/wham/realtime/calls?intent=quicksilver&architecture=avas',
+    );
+    assert.equal(init?.redirect, 'error');
+    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer test-only-token');
+    assert.ok(!String(init?.body).includes('test-only-token'));
+    assert.equal(JSON.parse(String(init?.body)).session.model, 'gpt-live-1.1-codex');
+    return new Response('v=0\r\nanswer', { status: 201, headers: { location: '/calls/test-call' } });
+  });
+  assert.equal(result.callId, 'test-call');
+  for (const status of [401, 403, 429, 500])
+    await assert.rejects(
+      createCodexLiveCall(input, async () => new Response('Bearer test-only-secret', { status })),
+      (error) => error instanceof Error && !error.message.includes('secret'),
+    );
+});

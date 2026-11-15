@@ -2,6 +2,9 @@
 
 /** 窗口控制只使用这些 Electron 能力，测试可在无桌面环境替换。 */
 export interface CompanionWindow {
+  readonly webContents?: {
+    on(event: 'will-prevent-unload', callback: (event: { preventDefault(): void }) => void): void;
+  };
   isDestroyed(): boolean;
   showInactive(): void;
   focus(): void;
@@ -14,6 +17,7 @@ export function createCompanionWindow(deps: {
   create: (options: Record<string, unknown>) => CompanionWindow;
   settingsUrl: string;
   log: (message: string) => void;
+  confirmDiscard?: (window: CompanionWindow) => boolean;
 }): { open: (view?: 'chat' | 'config', activate?: boolean) => void } {
   let window: CompanionWindow | undefined;
   let ready = false;
@@ -33,7 +37,6 @@ export function createCompanionWindow(deps: {
       }
       const address = new URL(deps.settingsUrl);
       address.searchParams.set('view', view);
-      currentView = view;
       if (!window || window.isDestroyed()) {
         ready = false;
         const next = deps.create({
@@ -53,6 +56,9 @@ export function createCompanionWindow(deps: {
           },
         });
         window = next;
+        next.webContents?.on('will-prevent-unload', (event) => {
+          if (deps.confirmDiscard?.(next)) event.preventDefault();
+        });
         next.once('ready-to-show', () => {
           if (window === next) {
             ready = true;
@@ -66,9 +72,14 @@ export function createCompanionWindow(deps: {
           }
         });
       }
-      void window
+      const target = window;
+      void target
         .loadURL(address.href)
-        .then(reveal)
+        .then(() => {
+          if (window !== target || target.isDestroyed()) return;
+          currentView = view;
+          reveal();
+        })
         .catch(() => deps.log('聊天窗口加载失败，请从托盘重新打开聊天。'));
     },
   };

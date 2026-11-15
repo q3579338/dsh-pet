@@ -23,7 +23,7 @@ function mountProtocolSelect() {
       { value: 'anthropic', label: 'Anthropic' },
     ],
     'openai-compatible',
-    () => { forgetModelOptions(); syncProtocolFields(); },
+    () => { forgetModelOptions(); syncProtocolFields(); markDirty(true, 'ai'); },
   );
   protocolSelect.root.firstElementChild.setAttribute('aria-labelledby', 'protocol-label');
   host.append(protocolSelect.root);
@@ -41,6 +41,7 @@ function mountBalanceSelect() {
     ],
     '',
     (picked) => {
+      markDirty(true, 'ai');
       const button = byId('balance-btn');
       if (button) button.disabled = picked === '';
       const result = byId('balance-result');
@@ -57,6 +58,7 @@ function mountBalanceSelect() {
 
 function selectTab(name) {
   stopVoicePreview();
+  if (name !== 'chat') document.dispatchEvent(new Event('pet-stop-live-voice'));
   for (const cell of document.querySelectorAll('[data-tab]')) {
     const active = cell.dataset.tab === name;
     cell.setAttribute('aria-selected', active ? 'true' : 'false');

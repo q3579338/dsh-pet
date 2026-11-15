@@ -2,6 +2,48 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCompanionWindow, type CompanionWindow } from './companion-window.ts';
 
+test('unsaved settings show a close decision; cancel stays open and discard permits unloading', () => {
+  let unload: ((event: { preventDefault(): void }) => void) | undefined;
+  let discard = false;
+  let confirmations = 0;
+  const companion = createCompanionWindow({
+    settingsUrl: 'http://127.0.0.1:1234/standalone-ai/',
+    log: () => {},
+    confirmDiscard: () => {
+      confirmations++;
+      return discard;
+    },
+    create: () => ({
+      isDestroyed: () => false,
+      showInactive() {},
+      focus() {},
+      once() {},
+      loadURL: async () => {},
+      webContents: {
+        on: (_event, callback) => {
+          unload = callback;
+        },
+      },
+    }),
+  });
+  companion.open();
+  let allowed = 0;
+  unload?.({
+    preventDefault: () => {
+      allowed++;
+    },
+  });
+  assert.equal(allowed, 0);
+  discard = true;
+  unload?.({
+    preventDefault: () => {
+      allowed++;
+    },
+  });
+  assert.equal(allowed, 1);
+  assert.equal(confirmations, 2);
+});
+
 test('native chat opens on request, reuses its draft and recreates only after closing', async () => {
   const created: Array<{ options: Record<string, unknown>; urls: string[]; ready: () => void; close: () => void }> = [];
   let focused = 0;

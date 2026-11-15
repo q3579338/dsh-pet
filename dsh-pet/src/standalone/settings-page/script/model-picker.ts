@@ -25,7 +25,7 @@ function openModelMenu(trigger) {
     byId('model').value.trim(),
     (picked) => {
       byId('model').value = picked;
-      markDirty(true);
+      markDirty(true, 'ai');
       setStatus(byId('model-result'), '已填入模型名称，记得保存。', 'ok');
     },
     byId('model-combo'),

@@ -5,11 +5,11 @@ import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
 
 /** 只在显式提供语音入口的外壳绑定；换宠物和卸载时释放麦克风与提示计时器。 */
-export function usePanelSpeech(rt: ChatPanelRuntime, state: ChatPanelState): void {
+export function usePanelSpeech(rt: ChatPanelRuntime, state: ChatPanelState, paused = false): void {
   const latest = rt.useRef(state);
   latest.current = state;
   rt.useEffect(() => {
-    if (!rt.speechInput) return;
+    if (!rt.speechInput || paused) return;
     const input = state.draftRef.current;
     const composer = input?.closest('.pet-chat-composer');
     const button = composer?.querySelector<HTMLButtonElement>('.pet-chat-mic');
@@ -42,5 +42,5 @@ export function usePanelSpeech(rt: ChatPanelRuntime, state: ChatPanelState): voi
       control.dispose();
       clearTimeout(timer);
     };
-  }, [state.petId]);
+  }, [state.petId, paused]);
 }

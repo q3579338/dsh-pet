@@ -48,7 +48,9 @@ interface ElectronApp extends StartupApp {
   on(event: 'codex-bigfish:chat', listener: (view?: 'chat' | 'config') => void): void;
   on(event: 'will-quit', listener: () => void): void;
 }
-const { app, session, nativeImage, screen, BrowserWindow, ipcMain } = createRequire(import.meta.url)('electron') as {
+const { app, session, nativeImage, screen, BrowserWindow, ipcMain, dialog } = createRequire(import.meta.url)(
+  'electron',
+) as {
   app: ElectronApp;
   screen: DpiScreen;
   BrowserWindow: {
@@ -56,6 +58,7 @@ const { app, session, nativeImage, screen, BrowserWindow, ipcMain } = createRequ
     getAllWindows(): Array<{ isDestroyed(): boolean; isVisible(): boolean; showInactive(): void }>;
   };
   ipcMain: { on(event: 'codex-bigfish:chat', listener: () => void): void };
+  dialog: { showMessageBoxSync(window: CompanionWindow, options: Record<string, unknown>): number };
   session: { defaultSession: DesktopSession };
   nativeImage: {
     createFromBuffer(buffer: Buffer): { isEmpty(): boolean; getSize(): { width: number; height: number } };
@@ -138,6 +141,17 @@ async function boot(): Promise<void> {
     create: (options) => new BrowserWindow(options),
     settingsUrl: security.authenticatedUrl(origin),
     log,
+    confirmDiscard: (window) =>
+      dialog.showMessageBoxSync(window, {
+        type: 'question',
+        title: '有未保存的改动',
+        message: '要放弃尚未保存的设置吗？',
+        detail: '选择“返回编辑”可继续保存。放弃后将继续关闭或切换窗口，已保存的设置和聊天记忆会保留。',
+        buttons: ['返回编辑', '放弃改动'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      }) === 1,
   });
   ipcMain.on('codex-bigfish:chat', () => companion.open());
   app.on('codex-bigfish:chat', (view) => companion.open(view));

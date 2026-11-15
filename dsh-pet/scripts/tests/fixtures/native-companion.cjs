@@ -11,6 +11,7 @@ const runDir = process.env.FISH_TEST_RUN,
   root = process.env.FISH_TEST_ROOT;
 const RealWindow = electron.BrowserWindow;
 const report = { offscreen: true, shown: false, responses: [], errors: [] };
+let closeChoice = 0;
 const HiddenWindow = new Proxy(RealWindow, {
   construct(target, args) {
     const options = args[0] || {};
@@ -34,6 +35,7 @@ RealWindow.prototype.showInactive = function () {};
 RealWindow.prototype.focus = function () {};
 const originalLoad = Module._load;
 const wrapped = { ...electron, BrowserWindow: HiddenWindow };
+wrapped.dialog = { ...electron.dialog, showMessageBoxSync: () => closeChoice };
 Module._load = function (name, ...args) {
   return name === 'electron' ? wrapped : originalLoad.call(this, name, ...args);
 };
@@ -312,6 +314,31 @@ const guard = setTimeout(() => {
       JSON.parse(fs.readFileSync(path.join(runDir, 'home/dsh-pet/main-config.jsonc'))).voiceName ===
       'edge/zh-CN-XiaoyiNeural';
     assert.equal(report.settingsPreview.savedOriginal, true);
+    await chatJs(
+      "(()=>{const model=document.querySelector('#model');model.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('#save').click();})()",
+    );
+    for (let i = 0; i < 80; i++) {
+      if (
+        await chatJs(
+          "document.querySelector('#status').dataset.ok === 'true' && document.querySelector('#dirty').hidden",
+        )
+      )
+        break;
+      await wait(100);
+    }
+    report.aiSaveClearsDirty = await chatJs("document.querySelector('#dirty').hidden");
+    assert.equal(report.aiSaveClearsDirty, true);
+    await chatJs(
+      "document.querySelector('#g-voice-name button').click();[...document.querySelectorAll('[role=option]')].find(item=>item.textContent.includes('糖芽')).click()",
+    );
+    closeChoice = 0;
+    chat.close();
+    await wait(150);
+    report.closeConfirmation = { cancelKeptWindow: !chat.isDestroyed() };
+    closeChoice = 1;
+    chat.close();
+    await wait(150);
+    report.closeConfirmation.discardClosedWindow = chat.isDestroyed();
     if (RealWindow.getAllWindows().some((item) => item.isVisible())) throw Error('A test window became visible');
     report.ok = true;
   } catch (error) {

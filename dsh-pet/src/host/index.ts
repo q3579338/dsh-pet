@@ -4,7 +4,8 @@
  * @module dsh-pet/src/host/index
  */
 import { createHostSetup } from './plugin/setup.ts';
-import { readAllConfig } from './config.ts';
+import { findPetInstance, readAllConfig } from './config.ts';
+import { composeSystemPrompt, petPersona } from './persona.ts';
 import { currentEnvironment, setCityProvider } from './environment.ts';
 import { createHttpRoute, registerHttpRoute } from './plugin/http-route.ts';
 import { registerLifecycle } from './plugin/lifecycle.ts';
@@ -28,6 +29,8 @@ import { ensureDshSpeechProvider } from './voice/builtin-dsh.ts';
 import { ensureEdgeProvider } from './voice/builtin-edge.ts';
 import { ensureCuteVoices } from './voice/builtin-cute.ts';
 import { ensureWindowsSpeech } from './voice/windows/providers.ts';
+import { ensureCodexSpeech } from './voice/codex/provider.ts';
+import { createLiveVoiceService } from './voice/live/service.ts';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { createVoiceService } from './voice/speak.ts';
 import { createHearService } from './voice/hear.ts';
@@ -133,6 +136,7 @@ export function apply(ctx: any): void {
   ensureEdgeProvider();
   if (process.env.DSH_PET_CODEX === '1') {
     ensureWindowsSpeech();
+    ensureCodexSpeech();
     ensureCuteVoices();
   } else ensureDshSpeechProvider({ speechToText: () => setup.optionalService('speechToText') });
   // DeepSeek 官方语音：鉴权复用 DSH 的 DEEPSEEK_API_KEY，与余额那条路一致；
@@ -149,6 +153,28 @@ export function apply(ctx: any): void {
     ensureDeepseekTtsProvider({ resolveKey: resolveDeepseekKey });
     ensureDeepseekAsrProvider({ resolveKey: resolveDeepseekKey });
   }
+
+  const liveVoice =
+    process.env.DSH_PET_CODEX === '1'
+      ? createLiveVoiceService({
+          home: userRoot,
+          settings: (petId) => {
+            const found = findPetInstance(readAllConfig(configPaths), petId);
+            if (!found) return undefined;
+            return {
+              prompt: composeSystemPrompt({
+                prompt: petPersona(found.conf, found.pet),
+                name: String(found.pet.name || petId),
+                id: petId,
+                now: new Date(),
+              }),
+              model: ctx.agentDefaultModel.currentSelection().model,
+            };
+          },
+          activeChanged: (active) => state.writeSection('voiceSession', { active }),
+        })
+      : undefined;
+  ctx.effect(() => () => liveVoice?.dispose());
 
   const deps: PetRouteDeps = {
     ...setup,
@@ -171,6 +197,7 @@ export function apply(ctx: any): void {
     // 语音合成：缓存落 userRoot，失败只留日志，不打断宿主。
     // 请求没带音色时用配置里的那个值——代码里没有第二份默认音色。
     voice,
+    liveVoice,
     // 语音识别：实现来自注册表；请求没带 provider 时用配置里的那个值，没有第二份默认
     speech: createHearService({
       configuredProvider: () => {

@@ -13,6 +13,30 @@ import { failResult, invalidJson, methodNotAllowed, okResult } from './result.ts
 export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): Promise<RouteResult | undefined> {
   const { body, method, rest, signal } = input;
 
+  if (rest === 'voice/live/start' || rest === 'voice/live/touch' || rest === 'voice/live/stop') {
+    if (method !== 'POST') return methodNotAllowed();
+    if (!deps.liveVoice) return failResult('unsupported', '当前模式未启用 Codex 即时语音。');
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body ?? 'null');
+    } catch {
+      return invalidJson();
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return failResult('bad-request', '语音参数无效。');
+    const value = parsed as Record<string, unknown>;
+    if (rest === 'voice/live/start') {
+      if (typeof value.petId !== 'string' || typeof value.sdp !== 'string')
+        return failResult('bad-request', '缺少桌宠或连接参数。');
+      return okResult(await deps.liveVoice.start(value.petId, value.sdp, signal));
+    }
+    if (typeof value.sessionId !== 'string' || !/^[\w-]{1,200}$/u.test(value.sessionId))
+      return failResult('bad-request', '语音会话编号无效。');
+    if (rest === 'voice/live/touch') return okResult({ ok: deps.liveVoice.touch(value.sessionId) });
+    await deps.liveVoice.stop(value.sessionId);
+    return okResult({ ok: true });
+  }
+
   if (rest === 'voice/voices') {
     if (method !== 'GET') return methodNotAllowed();
     return okResult({ ok: true, ...deps.voice.list() });

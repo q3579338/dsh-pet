@@ -6,18 +6,18 @@ import { dirname } from 'node:path';
 import { readJsonc } from '../../host/config/jsonc.ts';
 import type { ConfigPaths } from '../../host/config.ts';
 import { writePrivateJson } from '../ai-storage.ts';
-import { WINDOWS_SPEECH_ID } from '../../host/voice/windows/providers.ts';
+import { CODEX_SPEECH_ID } from '../../host/voice/codex/provider.ts';
 import { EDGE_PROVIDER_ID } from '../../host/voice/builtin-edge.ts';
 import { DEFAULT_VOICE } from '../../host/voice/voices.ts';
 import { limitedVoiceId } from '../../host/voice/types.ts';
 
-/** 识别使用本机组件，朗读缺省用原版晓伊；已保存的音色与播报开关继续保留。 */
+/** 缺省识别使用 Codex 听写，朗读使用原版晓伊；已保存的选择与播报开关继续保留。 */
 function localSpeechDefaults(config: Record<string, unknown>): Record<string, unknown> {
   if (process.platform !== 'win32') return config;
   return {
     ...config,
     ...(config.speechProvider === undefined || config.speechProvider === 'dsh'
-      ? { speechProvider: WINDOWS_SPEECH_ID }
+      ? { speechProvider: CODEX_SPEECH_ID }
       : {}),
     ...(config.voiceName === undefined ? { voiceName: limitedVoiceId(EDGE_PROVIDER_ID, DEFAULT_VOICE) } : {}),
     ...(config.voiceEnabled === undefined ? { voiceEnabled: true } : {}),

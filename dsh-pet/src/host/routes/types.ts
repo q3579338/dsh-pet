@@ -21,6 +21,7 @@ import type { PollStateStore } from '../state.ts';
 import type { VoiceTarget } from '../surface.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { HearService } from '../voice/hear.ts';
+import type { LiveVoiceService } from '../voice/live/service.ts';
 import type { VoiceService } from '../voice/speak.ts';
 import type { WorkStatusStore } from '../work-status.ts';
 
@@ -165,4 +166,6 @@ export interface PetRouteDeps {
   readonly voice: VoiceService;
   /** 语音识别服务（音频转文字；宿主没启用语音输入时由它自己回 unsupported）。 */
   readonly speech: HearService;
+  /** Codex 独立模式的即时语音；其他宿主没有此能力时不开放连接。 */
+  readonly liveVoice?: LiveVoiceService;
 }

@@ -1484,7 +1484,7 @@ paths:
         - name: id
           in: path
           required: true
-          description: '`POST /anim` 响应里的 `playbackId`。'
+          description: "`POST /anim` 响应里的 `playbackId`。"
           schema:
             type: string
           example: pb-mfh2k1-1
@@ -1551,7 +1551,7 @@ paths:
         - name: id
           in: path
           required: true
-          description: '`playbackId`。'
+          description: "`playbackId`。"
           schema:
             type: string
           example: pb-mfh2k1-1
@@ -1566,7 +1566,7 @@ paths:
                 status:
                   type: string
                   enum: [playing, ended, failed, cancelled]
-                  description: '只接受这四个——`accepted` 是宿主受理态，上报它回 400。'
+                  description: "只接受这四个——`accepted` 是宿主受理态，上报它回 400。"
                 reason:
                   type: string
                   description: |
@@ -2441,6 +2441,75 @@ paths:
               schema:
                 type: string
 
+  /dsh-pet-7340/voice/live/start:
+    post:
+      tags: [Voice]
+      operationId: startLiveVoice
+      summary: 使用已有 Codex 登录协商一通即时语音
+      description: |
+        仅 Codex 独立模式提供，沿用本机 Codex 登录，不向页面返回账号凭据。
+        页面经 WebRTC 直接传输声音；必须由用户点击开启，字幕不写入普通聊天记忆。
+        一次只允许一通。页面每 15 秒续租；断开 45 秒或两分钟无对话后释放。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [petId, sdp]
+              properties:
+                petId: { type: string }
+                sdp: { type: string, maxLength: 65536 }
+      responses:
+        "200":
+          description: 成功返回 ok、sessionId、answerSdp；失败返回 ok:false 和安全的 message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  sessionId: { type: string }
+                  answerSdp: { type: string }
+                  message: { type: string }
+
+  /dsh-pet-7340/voice/live/touch:
+    post:
+      tags: [Voice]
+      operationId: touchLiveVoice
+      summary: 续租指定的即时语音会话
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+      responses:
+        "200":
+          description: ok:true 表示会话仍然存活；ok:false 表示已结束
+
+  /dsh-pet-7340/voice/live/stop:
+    post:
+      tags: [Voice]
+      operationId: stopLiveVoice
+      summary: 结束指定的即时语音会话
+      description: 幂等；不匹配的编号不会影响另一通会话。页面同步停止麦克风和声音。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string }
+      responses:
+        "200":
+          description: 已停止或已经结束，返回 ok:true
+
   /dsh-pet-7340/voice/hear:
     post:
       tags: [Voice]
@@ -3216,7 +3285,7 @@ paths:
                   example: 1793000000000
       responses:
         "200":
-          description: '新建结果；正文为空 / 超长或 `dueAt` 非法时回 `ok: false` + `bad-request`'
+          description: "新建结果；正文为空 / 超长或 `dueAt` 非法时回 `ok: false` + `bad-request`"
           content:
             application/json:
               schema:
@@ -3284,7 +3353,7 @@ paths:
       tags: [Action]
       operationId: deleteTodo
       summary: 删除一条待办
-      description: '幂等：id 不存在也回 `ok: true`，`removed: 0`。'
+      description: "幂等：id 不存在也回 `ok: true`，`removed: 0`。"
       parameters:
         - $ref: "#/components/parameters/TodoIdPath"
       responses:
@@ -3453,7 +3522,17 @@ components:
 
     EnvironmentWeather:
       type: object
-      required: [city, summary, temperatureC, apparentC, humidityPercent, windKph, code, observedAt]
+      required:
+        [
+          city,
+          summary,
+          temperatureC,
+          apparentC,
+          humidityPercent,
+          windKph,
+          code,
+          observedAt,
+        ]
       properties:
         city:
           type: string
@@ -3654,6 +3733,16 @@ components:
               $ref: "#/components/schemas/ConfigLeaf"
             focusSession:
               $ref: "#/components/schemas/FocusSessionLeaf"
+            voiceSession:
+              type: object
+              properties:
+                counter: { type: integer }
+                data:
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      properties:
+                        active: { type: boolean }
         pets:
           type: object
           description: 每只宠物各自一份；键是宠物 id（**可含点号，勿切分**）
@@ -4763,7 +4852,7 @@ components:
           $ref: "#/components/schemas/Todo"
         reason:
           type: string
-          description: '失败原因（如 `bad-request` / `todo-not-found`）'
+          description: "失败原因（如 `bad-request` / `todo-not-found`）"
         message:
           type: string
 
@@ -4776,5 +4865,3 @@ components:
         removed:
           type: integer
           description: 删掉的条数；0 = 本来就没有（幂等）
-
-

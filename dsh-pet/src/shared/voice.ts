@@ -17,6 +17,8 @@ let voiceName = '';
 let voiceVolume = 1;
 /** 工作状态播报开关；只有成品配置明确为 true 才念。 */
 let notifyEnabled = false;
+/** 即时通话期间停掉普通播报，防止宠物自己的状态语音进入麦克风。 */
+let liveVoiceActive = false;
 /** 本端是网页端还是桌面端；`null` = 还没声明，此时不按叶子播放。 */
 let surface: VoiceTarget | null = null;
 /** 接口基址：网页端是同源前缀，桌面端由 `setVoiceBase` 换成 bridge 地址。 */
@@ -159,7 +161,20 @@ export function isVoiceNotifyEnabled(): boolean {
 
 /** 工作状态提示不能打断正在合成或播放的聊天、用户点播。 */
 export function isVoiceBusy(): boolean {
-  return autoSpeaking !== 0 || manualPending !== 0 || autoAudio !== null || manualAudio !== null;
+  return liveVoiceActive || autoSpeaking !== 0 || manualPending !== 0 || autoAudio !== null || manualAudio !== null;
+}
+
+/** 来自宿主通话状态；即时语音结束后普通音色继续按原配置使用。 */
+export function setLiveVoiceActive(active: unknown): void {
+  liveVoiceActive = active === true;
+  if (!liveVoiceActive) return;
+  ++autoSeq;
+  ++manualSeq;
+  stopAutoAudio();
+  manualAudio?.pause();
+  manualAudio = null;
+  manualPending = 0;
+  setVoiceState('idle');
 }
 
 /** 把音量收敛到 0–1；非数值按最大音量（1）处理——脏配置不该把声音悄悄变成 0。 */
@@ -214,6 +229,7 @@ export function playSayVoice(say: { readonly text: string; readonly voiceTo?: Vo
  */
 async function speakWhenReady(text: string, canPlayHidden = false): Promise<void> {
   await loadConfigOnce();
+  if (liveVoiceActive) return;
   const seq = ++utteranceSeq;
   // 先报开始再置 loading：气泡要靠这条事件挂起收起计时，晚一步它就可能已经收了。
   emitUtterance({ kind: 'start', seq, text });
@@ -398,7 +414,7 @@ let manualPending = 0;
  * @param onPhase - 阶段回调：请求合成时 `loading`、音频就绪开始播时 `playing`、播完 `idle`、失败或超时 `failed`。
  */
 export function speakText(text: string, onPhase?: (phase: SpeakPhase) => void): void {
-  if (!text) return;
+  if (!text || liveVoiceActive) return;
   void playManual(text, onPhase);
 }
 

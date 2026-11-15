@@ -497,11 +497,17 @@ export const PANEL_CSS = `
 
 .pet-chat-composer-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: ${px(SIZE.gap)};
 }
 
 .pet-chat-mic { flex: 0 0 auto; }
+.pet-chat-live-button { flex: 0 0 auto; }
+.pet-chat-live-button[aria-pressed="true"] { color: var(--dsw-alias-label-error); }
+.pet-chat-live { margin-top: 4px; padding: 10px; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-interactive-bg-hover); font: var(--dsw-font-xxs-12); line-height: 1.6; overflow-wrap: anywhere; max-height: 12em; overflow-y: auto; }
+.pet-chat-live-status { font-weight: 600; }
+.pet-chat-live-note { color: var(--dsw-alias-label-secondary); margin-bottom: 6px; }
 .pet-chat-mic[data-hear="recording"] { color: var(--dsw-alias-label-error); }
 .pet-chat-hear-hint { min-height: 3em; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12); line-height: 1.5; overflow-wrap: anywhere; }
 .pet-chat-hear-hint:empty { visibility: hidden; }

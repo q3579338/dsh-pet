@@ -9,6 +9,7 @@ import type { DragLike, DropTargetLike } from '../file-drop.ts';
 import type { Key } from './locales/index.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState, ConfirmKind, DraftKeyEvent } from './types.ts';
+import type { LiveVoiceView } from './live-voice.ts';
 
 /**
  * 已删宠物残留历史的提示条：显示数量并给一个「清理」。
@@ -240,6 +241,7 @@ export function composerNode(
   t: ChatPanelRuntime['t'],
   state: ChatPanelState,
   speechInput = false,
+  live?: LiveVoiceView,
 ): unknown {
   return h('div', {
     className: 'pet-chat-composer' + (state.busy ? ' is-busy' : ''),
@@ -271,7 +273,10 @@ export function composerNode(
           event.preventDefault();
           state.pickFile(file);
         },
-        onKeyDown: (event: DraftKeyEvent) => state.onDraftKeyDown(event),
+        onKeyDown: (event: DraftKeyEvent) => {
+          if (live?.active && event.key === 'Enter' && !event.shiftKey) event.preventDefault();
+          else state.onDraftKeyDown(event);
+        },
         onCompositionStart: () => state.onDraftCompositionStart(),
         onCompositionEnd: () => state.onDraftCompositionEnd(),
       }),
@@ -287,6 +292,7 @@ export function composerNode(
                 className: 'pet-chat-file',
                 type: 'file',
                 accept: 'image/png,image/jpeg,image/webp,image/gif',
+                disabled: live?.active,
                 onChange: (event: { target: { files: FileList | null; value: string } }) => {
                   const file = event.target.files?.[0];
                   if (file !== undefined) state.pickFile(file);
@@ -296,13 +302,23 @@ export function composerNode(
             ],
           }),
           h('span', { className: 'pet-chat-composer-spacer' }),
+          live
+            ? h('button', {
+                type: 'button',
+                className: 'pet-chat-tool pet-chat-live-button',
+                onClick: live.toggle,
+                disabled: !live.active && (state.busy || !state.petId),
+                'aria-pressed': String(live.active),
+                children: live.phase === 'connecting' ? '取消连接' : live.active ? '结束语音' : '即时语音',
+              })
+            : null,
           speechInput
             ? h('button', {
                 type: 'button',
                 className: 'pet-chat-tool pet-chat-mic',
                 title: '按住说话',
                 'aria-label': '按住说话',
-                disabled: state.busy,
+                disabled: state.busy || live?.active === true,
                 children: '按住说话',
               })
             : null,
@@ -311,7 +327,7 @@ export function composerNode(
             className: 'pet-chat-send' + (state.busy ? ' is-busy' : ''),
             'aria-label': state.busy ? t('composerSending') : t('composerSend'),
             onClick: () => state.send(),
-            disabled: state.busy,
+            disabled: state.busy || live?.active === true,
             // 生成中换转圈：箭头留着会让人以为还能点（按钮此时是 disabled）
             children: state.busy
               ? h('span', { className: 'pet-chat-send-spinner', 'aria-hidden': 'true' })
@@ -320,6 +336,25 @@ export function composerNode(
         ],
       }),
       speechInput ? h('div', { className: 'pet-chat-hear-hint', role: 'status', 'aria-live': 'polite' }) : null,
+      live && live.message
+        ? h('div', {
+            className: 'pet-chat-live',
+            role: 'status',
+            'aria-live': 'polite',
+            children: [
+              h('div', { className: 'pet-chat-live-status', children: live.message }),
+              live.active
+                ? h('div', {
+                    className: 'pet-chat-live-note',
+                    children:
+                      '麦克风正在使用，语音发送至 Codex/OpenAI。即时语音使用 Codex 原生音色，普通聊天继续用所选音色。本次字幕不写入普通聊天记忆。',
+                  })
+                : null,
+              live.user ? h('div', { className: 'pet-chat-live-user', children: '你：' + live.user }) : null,
+              live.pet ? h('div', { className: 'pet-chat-live-pet', children: state.petName + '：' + live.pet }) : null,
+            ],
+          })
+        : null,
     ],
   });
 }

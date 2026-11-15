@@ -93,7 +93,7 @@ function voiceCard() {
     toggleRow('g-voice-whisper', '周期碎碎念也念出来', '定时生成的那句碎碎念念出来。', g.voiceWhisperEnabled, (value) => setGlobal('voiceWhisperEnabled', value)),
     toggleRow('g-voice-todo', '待办提醒也念出来', '到点的待办提醒念出来。', g.voiceTodoEnabled, (value) => setGlobal('voiceTodoEnabled', value)),
     toggleRow('g-voice-notify', '工作状态播报', '状态变化时念一句角色台词。进行中提示会限频，聊天朗读优先；桌面端在后台也可播报。', g.voiceNotifyEnabled, (value) => setGlobal('voiceNotifyEnabled', value)),
-    selectField('g-speech-provider', '语音识别', g.speechProvider, speechProviders.map((item) => ({ value: item.id, label: item.name })), (value) => setGlobal('speechProvider', value), '按住话筒录音，松开后识别为文字；确认文字后发送给 Codex。Windows 本机识别与朗读无需 DeepSeek 或额外密钥，录音不会上传给识别服务。'),
+    selectField('g-speech-provider', '语音识别', g.speechProvider, speechProviders.map((item) => ({ value: item.id, label: item.name })), (value) => setGlobal('speechProvider', value), 'Codex 听写沿用已有登录，将按住录制的音频上传到 Codex/OpenAI 识别；松开后先填入草稿，确认再发送。Windows 本机识别可选用，录音留在本机。'),
   ]);
 }
 

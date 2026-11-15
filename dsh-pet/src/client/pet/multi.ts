@@ -47,7 +47,7 @@ import type { WorkStatusSnapshot } from '../../shared/work-status.ts';
 import type { PetCardProps } from './card/props.ts';
 import type { PetRuntime, RuntimePet } from './types.ts';
 import { setClickSoundEnabled } from './click-sound.ts';
-import { setSurface, setVoiceConfig, setVoiceNotifyEnabled } from '../../shared/voice.ts';
+import { setSurface, setVoiceConfig, setVoiceNotifyEnabled, setLiveVoiceActive } from '../../shared/voice.ts';
 import { runStatePoll } from './state-poll.ts';
 import { setMenuItems } from '../menu-service.ts';
 import { setStateSnapshot } from '../state-service.ts';
@@ -325,6 +325,7 @@ export function createPetMulti(
       const applyState = (s: PollState) => {
         // 最近一拍先留给同页消费者（petApi7340.getState）：它读的是同一个对象，不占连接。
         setStateSnapshot(s);
+        setLiveVoiceActive((s.sections.voiceSession?.data as { active?: unknown } | null)?.active);
         if (baseline === null) {
           baseline = flattenCounters(s); // 首拉只记基线，不渲染。
           // 跳会话是一次性信号：页面没开时写下的那条会被首拉基线吞掉，这里按写入时刻补一次。

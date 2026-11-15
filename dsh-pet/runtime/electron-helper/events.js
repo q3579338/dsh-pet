@@ -485,6 +485,9 @@ async function pollStateOnce() {
     // 这时必须退回固定间隔轮询，否则这个循环就是忙等。
     stateLongPoll = typeof s.counter === 'number';
     if (stateLongPoll) stateSince = s.counter;
+    S.setLiveVoiceActive(
+      !!(s.sections && s.sections.voiceSession && s.sections.voiceSession.data && s.sections.voiceSession.data.active),
+    );
     if (stateBaseline === null) {
       stateBaseline = S.flattenCounters(s); // 首拉：只记基线，不渲染（避免启动/重载时重放旧气泡）
       // 第三方菜单项是状态而不是事件：首拉就要装上，否则 helper 重启后要等下次注册才出现

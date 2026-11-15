@@ -19,9 +19,32 @@ import {
   setSurface,
   setVoiceConfig,
   speakNotice,
+  speakText,
+  setLiveVoiceActive,
+  isVoiceBusy,
   subscribeVoiceUtterance,
   type VoiceUtteranceEvent,
 } from './voice.ts';
+
+test('即时语音占用时跳过普通播报；结束后恢复原音色', async () => {
+  const fetch = stubFetch();
+  try {
+    setVoiceConfig('edge/zh-CN-XiaoyiNeural', 1);
+    setSurface('desktop');
+    setLiveVoiceActive(true);
+    assert.equal(isVoiceBusy(), true);
+    speakNotice('不要在通话中播报');
+    speakText('暂不点播');
+    playSayVoice({ text: '暂不朗读', voiceTo: 'desktop' });
+    await new Promise<void>((done) => setTimeout(done, 0));
+    assert.equal(fetch.calls.length, 0);
+    setLiveVoiceActive(false);
+    assert.equal(isVoiceBusy(), false);
+  } finally {
+    setLiveVoiceActive(false);
+    fetch.restore();
+  }
+});
 
 /** 假的合成端点：记录每次请求，响应默认是一个假音频；`ok: false` 模拟宿主返回失败。 */
 function stubFetch(options: { ok?: boolean; hold?: boolean } = {}): {
