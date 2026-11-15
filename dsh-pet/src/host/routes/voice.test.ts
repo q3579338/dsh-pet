@@ -58,6 +58,31 @@ test('GET /voice/voices：按 provider 分组返回音色目录', async () => {
   assert.deepEqual(result.obj, { ok: true, ...CATALOG });
 });
 
+test('准备与释放所选音色的连接只转发所有者，不请求正文合成；无效请求和方法明确拒绝', async () => {
+  const calls: unknown[] = [];
+  const deps = makeDeps(async () => assert.fail('Warm must not synthesize a placeholder'));
+  deps.voice.warm = async (...args) => {
+    calls.push(args);
+    return true;
+  };
+  for (const active of [true, false]) {
+    const result = await handleVoiceRoutes(
+      deps,
+      input('voice/warm', 'POST', JSON.stringify({ voice: 'bigfish-cute/starbell-v1', owner: 'call-1', active })),
+    );
+    assert.equal(result?.kind, 'json');
+  }
+  assert.deepEqual(calls, [
+    ['bigfish-cute/starbell-v1', 'call-1', true],
+    ['bigfish-cute/starbell-v1', 'call-1', false],
+  ]);
+  const bad = await handleVoiceRoutes(deps, input('voice/warm', 'POST', '{"voice":"x","owner":"","active":true}'));
+  assert.equal(bad?.kind === 'json' && (bad.obj as { reason: string }).reason, 'bad-request');
+  const method = await handleVoiceRoutes(deps, input('voice/warm', 'GET'));
+  assert.equal(method?.kind === 'json' && method.status, 405);
+  assert.equal(calls.length, 2);
+});
+
 test('POST /voice/speak 成功：交回音频文件与实现声明的 MIME', async () => {
   const result = await handleVoiceRoutes(
     makeDeps(async () => ({ ok: true, file: '/cache/a.mp3', contentType: 'audio/mpeg' })),

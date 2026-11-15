@@ -101,7 +101,7 @@ export default defineConfig([
       /^openai$/,
       /^@anthropic-ai\/sdk$/,
       // 语音合成：运行时才 import，但应用产物无 node_modules，必须内联（连它的 ws 一起）。
-      /^@andresaya\/edge-tts$/,
+      /^@andresaya\/edge-tts(?:\/|$)/,
       /^undici$/,
     ],
     external: ['electron', /^@electron\//, /^node:/, /^@deepseek-ai\/(?!dsh-home-paths$|dsh-credentials$|dsh-llm$)/],

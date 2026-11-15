@@ -82,6 +82,14 @@ test(
       assert.equal(report.rememberedTone, 'dango');
       for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
         assert.ok(report.custom.played.includes('bigfish-cute/' + id));
+      for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
+        assert.ok(
+          report.custom.metrics.some(
+            (row) => row.voice === 'bigfish-cute/' + id && Number.isFinite(row.fromSpeechEndMs),
+          ),
+          'Each voice needs an actual response after the synthetic user finishes',
+        );
+      assert.ok(report.custom.warmRequests.some((row) => row.active && row.prepared));
     } finally {
       if (child.exitCode === null) child.kill();
       if (env.DSH_PET_NATIVE_LIVE_EVIDENCE) {

@@ -1,5 +1,5 @@
 /** 大肥鱼的原创调音预设：基于 Edge 女声调整语速与音高，沿用统一的合成、缓存及取消链路。 */
-import { synthesize, synthesizeStream, type EdgeSynthInput } from './edge.ts';
+import { synthesize, synthesizeStream, prepareEdgeVoice, type EdgeSynthInput } from './edge.ts';
 import { registerVoiceProvider, resolveVoice } from './registry.ts';
 import { limitedVoiceId, type VoiceProvider } from './types.ts';
 import { EDGE_PROVIDER } from './builtin-edge.ts';
@@ -26,6 +26,7 @@ export function createCuteVoiceProvider(
     voices: CUTE_VOICES.map(({ id, name, tag }) => ({ id, name, tag })),
     format: 'mp3',
     timeoutMs: EDGE_PROVIDER.timeoutMs,
+    prepare: prepareEdgeVoice,
     async synthesize({ text, voice, rate, signal }) {
       const preset = CUTE_VOICES.find((item) => item.id === voice);
       if (!preset) throw new Error('没有找到所选的调音预设');

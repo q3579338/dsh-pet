@@ -6,7 +6,7 @@
  * @module dsh-pet/src/host/voice/builtin-edge
  */
 import { registerVoiceProvider, resolveVoice } from './registry.ts';
-import { synthesize, synthesizeStream } from './edge.ts';
+import { synthesize, synthesizeStream, prepareEdgeVoice } from './edge.ts';
 import { limitedVoiceId, type VoiceProvider } from './types.ts';
 import { DEFAULT_VOICE, VOICES } from './voices.ts';
 
@@ -31,6 +31,7 @@ export const EDGE_PROVIDER: VoiceProvider = {
   timeoutMs: EDGE_TIMEOUT_MS,
   synthesize,
   stream: synthesizeStream,
+  prepare: prepareEdgeVoice,
 };
 
 /**

@@ -20,6 +20,7 @@ interface ServiceOptions {
   /** 请求不带 voice 时读到的配置值；缺省 `demo/v1`。 */
   configuredVoice?: () => string | undefined;
   staleWaitMs?: number;
+  prepare?: VoiceProvider['prepare'];
 }
 
 /** 造一个隔离的语音服务：注册一个 id 为 `demo` 的假实现，用完复位注册表。 */
@@ -38,6 +39,7 @@ async function withService(
     ...(options.format === undefined ? {} : { format: options.format }),
     ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     synthesize: options.synthesize ?? (async () => new Uint8Array([1])),
+    ...(options.prepare ? { prepare: options.prepare } : {}),
   };
   registerVoiceProvider(provider);
   try {
@@ -80,6 +82,22 @@ test('相同音色和正文的并发预热与播放只合成一次', async () =>
     },
   );
 });
+
+test('连接准备仅路由到所选实现，并保留失败结果，不为准备生成占位语音', () =>
+  withService(
+    async (service) => {
+      assert.equal(await service.warm!('demo/v1', 'call', true), false);
+      assert.equal(await service.warm!('demo/v1', 'call', false), true);
+      assert.equal(await service.warm!('missing/v1', 'call', true), false);
+    },
+    {
+      synthesize: async () => assert.fail('No placeholder audio'),
+      prepare: async (owner, active) => {
+        assert.equal(owner, 'call');
+        return !active;
+      },
+    },
+  ));
 
 test('text 为空或全空白：判 bad-request 且不调用合成', () =>
   withService(

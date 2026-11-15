@@ -10,6 +10,50 @@
  * @module dsh-pet/src/host/voice/edge
  */
 import type { SynthInput } from './types.ts';
+import { createSpeechConnectionPool } from './connection-pool.ts';
+
+/** 懒加载仍然保留，未开启连续语音不会准备额外连接。 */
+type WarmEngine = {
+  connectSocket(): Promise<import('./connection-pool.ts').SpeechSocket>;
+  synthesizeStream: InstanceType<EdgeTtsModule['EdgeTTS']>['synthesizeStream'];
+};
+let engine: Promise<WarmEngine> | undefined;
+const connections = createSpeechConnectionPool({ connect: async () => (await warmEngine()).connectSocket() });
+
+/** SSML 和签名使用原 SDK；仅替换其连接生命周期。 */
+function warmEngine(): Promise<WarmEngine> {
+  return (engine ??= (async () => {
+    const mod = (await import('@andresaya/edge-tts')) as EdgeTtsModule & { default?: EdgeTtsModule };
+    const EdgeTTS = mod.EdgeTTS ?? mod.default?.EdgeTTS;
+    const Constants = mod.Constants ?? mod.default?.Constants;
+    type Protocol = typeof import('@andresaya/edge-tts/dist/core/protocol.js');
+    const protocol = (await import('@andresaya/edge-tts/dist/core/protocol.js')) as Protocol & { default?: Protocol };
+    const buildSynthesisUrl = protocol.buildSynthesisUrl ?? protocol.default?.buildSynthesisUrl;
+    const generateUUID = protocol.generateUUID ?? protocol.default?.generateUUID;
+    if (!EdgeTTS || !Constants || !buildSynthesisUrl || !generateUUID) throw new VoiceSynthError('语音依赖无法加载');
+    return new (class extends EdgeTTS {
+      protected override openSocket(url: string) {
+        return connections.take(() => super.openSocket(url));
+      }
+      async connectSocket() {
+        return super.openSocket(
+          buildSynthesisUrl(
+            Constants.WSS_URL,
+            Constants.TRUSTED_CLIENT_TOKEN,
+            await this.signature(),
+            Constants.VERSION_MS_GEC,
+            generateUUID(),
+          ),
+        );
+      }
+    })();
+  })());
+}
+
+/** 只在用户打开连续自定义语音或实际开口时准备，结束时撤销对应所有者。 */
+export async function prepareEdgeVoice(owner: string, active: boolean): Promise<boolean> {
+  return connections.prepare(owner, active);
+}
 
 /** 依赖的模块形状：运行时代码只出现在按需 import 处。 */
 type EdgeTtsModule = typeof import('@andresaya/edge-tts');
@@ -102,7 +146,7 @@ export async function* synthesizeStream(input: EdgeSynthInput): AsyncGenerator<U
   const EdgeTTS = mod.EdgeTTS ?? mod.default?.EdgeTTS;
   if (!EdgeTTS) throw new VoiceSynthError('依赖未导出 EdgeTTS');
   const started = await retryVoiceRateLimit(async () => {
-    const iterator = new EdgeTTS().synthesizeStream(input.text, input.voice, {
+    const iterator = (await warmEngine()).synthesizeStream(input.text, input.voice, {
       rate: input.rate,
       ...(input.pitch === undefined ? {} : { pitch: input.pitch }),
       signal: input.signal,

@@ -189,7 +189,9 @@ export function createLiveVoiceControl(options: {
         });
         current.speech.begin();
         current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
-          if (relevant() && current.speech?.busy()) current.speech.interrupt();
+          if (!relevant()) return;
+          if (current.speech?.busy()) current.speech.interrupt();
+          current.speech?.prime?.();
         });
       }
       current.audio.hidden = true;

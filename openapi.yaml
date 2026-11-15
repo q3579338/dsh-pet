@@ -2683,6 +2683,34 @@ paths:
         "405":
           description: 方法不是 POST。
 
+  /dsh-pet-7340/voice/warm:
+    post:
+      tags: [Voice]
+      operationId: prepareVoiceConnection
+      summary: 准备或释放连续聊天的音色连接
+      description: |
+        只准备网络连接，不合成台词。使用唯一 owner 隔离不同通话，active=false
+        释放对应所有者；迟到的已关闭所有者不能再次占用连接。连接空闲有界回收。
+        不支持准备或准备失败不影响后续正常合成，不替换实际音色。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [voice, owner, active]
+              properties:
+                voice: { type: string, maxLength: 200 }
+                owner: { type: string, pattern: "^[\\w-]{1,80}$" }
+                active: { type: boolean }
+      responses:
+        "200":
+          description: 准备结果或结构化业务错误；prepare 失败不回传上游细节。
+        "400":
+          description: 请求体不是合法 JSON。
+        "405":
+          description: 方法不是 POST。
+
   /dsh-pet-7340/voice/stream:
     post:
       tags: [Voice]

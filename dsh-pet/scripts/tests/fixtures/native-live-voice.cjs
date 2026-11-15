@@ -108,23 +108,25 @@ const guard = setTimeout(() => {
     assert.deepEqual(report.stylePicker.modes, ['natural', 'custom']);
     assert.equal(report.stylePicker.streaming, true);
     await js(`(async()=>{
-      window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[]};
-      document.addEventListener('pet-custom-voice-play',event=>__live.metrics.push(event.detail));
+      window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[],utterances:[],warmRequests:[]};
+      document.addEventListener('pet-custom-voice-play',event=>{const row=__live.currentUtterance;__live.metrics.push({...event.detail,...(row?{fromSpeechEndMs:Math.round(performance.now()-row.endAt)}:{})});});
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
         const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
+        const warm=String(url).endsWith('/voice/warm')?{active:JSON.parse(init?.body||'{}').active,at:performance.now()}:undefined;if(warm)__live.warmRequests.push(warm);
         const queuedAt=performance.now();const response=await originalFetch(url,init);
+        if(warm)void response.clone().json().then(value=>Object.assign(warm,{status:response.status,prepared:value.prepared,reason:value.reason})).catch(()=>{});
         if(voice){const row={voice,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
         return response;
       };
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
       window.__ctx=new AudioContext();const decoded=await __ctx.decodeAudioData(buffer.buffer);const pcm=decoded.getChannelData(0);let first=0,last=pcm.length-1;while(first<last&&Math.abs(pcm[first])<0.005)first++;while(last>first&&Math.abs(pcm[last])<0.005)last--;first=Math.max(0,first-Math.round(decoded.sampleRate*0.02));last=Math.min(pcm.length-1,last+Math.round(decoded.sampleRate*0.02));window.__sample=__ctx.createBuffer(1,last-first+1,decoded.sampleRate);__sample.copyToChannel(pcm.slice(first,last+1),0);
       navigator.mediaDevices.getUserMedia=async()=>{
-        __live.requests++;window.__out=__ctx.createMediaStreamDestination();__live.tracks.push(...__out.stream.getTracks());return __out.stream;
+        __live.requests++;__live.currentInput=undefined;__live.currentUtterance=undefined;window.__out=__ctx.createMediaStreamDestination();__live.tracks.push(...__out.stream.getTracks());return __out.stream;
       };
-      window.__speakLiveSample=async()=>{const source=__ctx.createBufferSource();source.buffer=__sample;source.connect(__out);await __ctx.resume();source.start();};
+      window.__speakLiveSample=async()=>{const source=__ctx.createBufferSource();source.buffer=__sample;source.connect(__out);await __ctx.resume();const row={startAt:performance.now(),endAt:performance.now()+__sample.duration*1000};__live.utterances.push(row);source.start();};
       const RealPeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(RealPeer,{construct(target,args){
         const peer=new target(...args);__live.peers.push(peer);
-        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.type==='input_transcript.added')__live.inputs++;if(value.type==='turn.created'&&value.turn.role==='assistant')__live.assistantCreated++;if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.assistantDoneAt.push(performance.now());}});return channel;};
+        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.type==='input_transcript.added'){__live.inputs++;__live.currentInput=__live.utterances[__live.utterances.length-1];}if(value.type==='turn.created'&&value.turn.role==='assistant'){__live.assistantCreated++;__live.currentUtterance=__live.currentInput;}if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.assistantDoneAt.push(performance.now());}});return channel;};
         peer.addEventListener('track',event=>{
           const stream=event.streams[0]||new MediaStream([event.track]);window.__recorder=new MediaRecorder(stream);
           __recorder.ondataavailable=event=>{if(event.data.size)__live.blobs.push(event.data);};__recorder.start(500);
@@ -146,7 +148,16 @@ const guard = setTimeout(() => {
     assert.equal(report.connected, true);
     await js('__speakLiveSample()');
     for (let i = 0; i < 180; i++) {
-      if (await js("__live.customPlayed.includes('bigfish-cute/starbell-v1')")) break;
+      if (
+        await js(
+          "__live.metrics.some(row=>row.voice==='bigfish-cute/starbell-v1'&&Number.isFinite(row.fromSpeechEndMs))",
+        )
+      )
+        break;
+      const failed = await js(
+        "document.querySelector('.pet-chat-live-button').textContent==='语音聊天' ? document.querySelector('.pet-chat-live-status')?.textContent : ''",
+      );
+      if (failed) throw new Error(failed);
       await wait(100);
     }
     assert.equal(await js("document.querySelector('audio[data-pet-native-voice]').volume"), 0);
@@ -157,7 +168,9 @@ const guard = setTimeout(() => {
     assert.equal(report.bargeInStoppedOld, true);
     for (let i = 0; i < 180; i++) {
       if (
-        await js("__live.inputs>=2 && __live.customPlayed.filter(voice=>voice==='bigfish-cute/starbell-v1').length>=2")
+        await js(
+          "__live.inputs>=2 && __live.metrics.filter(row=>row.voice==='bigfish-cute/starbell-v1'&&Number.isFinite(row.fromSpeechEndMs)).length>=2",
+        )
       )
         break;
       await wait(100);
@@ -213,7 +226,12 @@ const guard = setTimeout(() => {
     }
     await js('__speakLiveSample()');
     for (let i = 0; i < 300; i++) {
-      if (await js("__live.customPlayed.includes('bigfish-cute/sugarbud-v1')")) break;
+      if (
+        await js(
+          "__live.metrics.some(row=>row.voice==='bigfish-cute/sugarbud-v1'&&Number.isFinite(row.fromSpeechEndMs))",
+        )
+      )
+        break;
       await wait(100);
     }
     assert.equal(await js("__live.customPlayed.includes('bigfish-cute/sugarbud-v1')"), true);
@@ -234,7 +252,10 @@ const guard = setTimeout(() => {
     }
     await js('__speakLiveSample()');
     for (let i = 0; i < 300; i++) {
-      if (await js("__live.customPlayed.includes('bigfish-cute/dango-v1')")) break;
+      if (
+        await js("__live.metrics.some(row=>row.voice==='bigfish-cute/dango-v1'&&Number.isFinite(row.fromSpeechEndMs))")
+      )
+        break;
       await wait(100);
     }
     assert.equal(await js("__live.customPlayed.includes('bigfish-cute/dango-v1')"), true);
@@ -244,7 +265,7 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     report.custom = await js(
-      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt})',
+      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,warmRequests:__live.warmRequests})',
     );
     assert.ok(
       report.custom.requests.every((request) => request.aborted || request.type.includes('audio')),

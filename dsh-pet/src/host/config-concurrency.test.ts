@@ -49,6 +49,7 @@ before(async () => {
     external: (id) =>
       id.startsWith('node:') ||
       (id.startsWith('@deepseek-ai/') && !(id in aliases)) ||
+      id.startsWith('@andresaya/edge-tts/') ||
       ['zod', '@electron/get', '@electron-internal/extract-zip', '@andresaya/edge-tts'].includes(id),
     plugins: [{ name: 'standalone-test-shims', resolveId: (id) => aliases[id] }],
   });

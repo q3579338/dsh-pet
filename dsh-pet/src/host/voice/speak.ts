@@ -49,6 +49,7 @@ export interface VoiceService {
   /** 合成一段文本；同一输入命中缓存时不再调用实现。 */
   speak(raw: unknown, signal?: AbortSignal): Promise<SpeakResult>;
   stream?(raw: unknown, signal?: AbortSignal): Promise<SpeechStreamResult>;
+  warm?(voice: string, owner: string, active: boolean): Promise<boolean>;
   /** 当前音色目录（由注册表提供）。 */
   list(): VoiceCatalog;
 }
@@ -412,5 +413,14 @@ export function createVoiceService(options: {
       return signal?.aborted ? cancelled() : job.promise;
     }
   }
-  return { list: listCatalog, speak, stream };
+  return {
+    list: listCatalog,
+    speak,
+    stream,
+    async warm(voiceId, owner, active) {
+      const provider = resolveVoice(voiceId)?.provider;
+      if (!provider?.prepare) return false;
+      return (await provider.prepare(owner, active)) !== false;
+    },
+  };
 }

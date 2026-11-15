@@ -7,6 +7,74 @@ async function tick(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
+test('较短的完整首句立即合成，不等八个字或整轮结束', async () => {
+  const requested: string[] = [];
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        return new Blob([text]);
+      },
+      play: async () => {},
+    },
+  });
+  queue.begin();
+  queue.append('你好呀，');
+  await tick();
+  assert.deepEqual(requested, ['你好呀，']);
+  queue.append('今天也陪着你。');
+  queue.finish();
+  await tick();
+  assert.equal(requested.join(''), '你好呀，今天也陪着你。');
+  queue.dispose();
+  const short: string[] = [];
+  const next = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        short.push(text);
+        return new Blob([text]);
+      },
+      play: async () => {},
+    },
+  });
+  next.begin();
+  next.append('好！');
+  await tick();
+  assert.deepEqual(short, ['好！']);
+  next.dispose();
+});
+
+test('首句持续出字也有固定等待上限，不被每个新增字反复推迟，打断清理计时器', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const requested: string[] = [];
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        return new Blob([text]);
+      },
+      play: async () => {},
+    },
+  });
+  queue.begin();
+  queue.append('我来帮你');
+  t.mock.timers.tick(80);
+  queue.append('看看');
+  t.mock.timers.tick(80);
+  await tick();
+  assert.deepEqual(requested, ['我来帮你看看']);
+  queue.begin();
+  queue.append('新的内容');
+  queue.interrupt();
+  t.mock.timers.tick(1000);
+  await tick();
+  assert.equal(requested.length, 1);
+  queue.dispose();
+});
+
 test('首句在整轮结束前播放；最多预取两段，并按原顺序完整读完', async () => {
   const requested: string[] = [];
   const played: string[] = [];

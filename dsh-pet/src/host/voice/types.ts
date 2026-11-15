@@ -52,6 +52,8 @@ export interface VoiceProvider {
   synthesize(input: SynthInput): Promise<Uint8Array>;
   /** 可选的真实音频字节流；参数与完整合成相同。 */
   stream?(input: SynthInput): AsyncIterable<Uint8Array>;
+  /** 连续聊天按所有者准备／释放连接，不生成音频。 */
+  prepare?(owner: string, active: boolean): Promise<boolean | void>;
 }
 
 /** 限定 id 命中注册表后的结果；`limitedId` 原样带回，供缓存键与日志使用。 */

@@ -44,6 +44,34 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
     return okResult({ ok: true, ...deps.voice.list() });
   }
 
+  if (rest === 'voice/warm') {
+    if (method !== 'POST') return methodNotAllowed();
+    let raw: unknown;
+    try {
+      raw = JSON.parse(body ?? 'null');
+    } catch {
+      return invalidJson();
+    }
+    const value = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    if (
+      typeof value.voice !== 'string' ||
+      value.voice.length > 200 ||
+      typeof value.owner !== 'string' ||
+      !/^[\w-]{1,80}$/u.test(value.owner) ||
+      typeof value.active !== 'boolean'
+    )
+      return failResult('bad-request', '音色连接参数无效。');
+    if (signal?.aborted) return { kind: 'none' };
+    try {
+      return okResult({
+        ok: true,
+        prepared: (await deps.voice.warm?.(value.voice, value.owner, value.active)) ?? false,
+      });
+    } catch {
+      return okResult({ ok: true, prepared: false });
+    }
+  }
+
   if (rest === 'voice/speak' || rest === 'voice/stream') {
     if (method !== 'POST') return methodNotAllowed();
     let parsed: unknown;

@@ -17,16 +17,17 @@ export interface CustomSpeechQueue {
   interrupt(): void;
   busy(): boolean;
   dispose(): void;
+  prime?(): void;
 }
 
 /** 分句保持 Unicode 字符完整；首句采用较短边界，后续段扩大以减少在线合成次数。 */
 function boundary(text: string, first: boolean, final: boolean): number {
   let end = 0;
-  const limit = first ? 24 : 96;
+  const limit = first ? 18 : 96;
   for (const char of text) {
     if (end + char.length > limit) return end;
     end += char.length;
-    if (end >= (first ? 6 : 24) && /[。！？!?；;\n]|[，,、]/u.test(char)) return end;
+    if (end >= (first ? 2 : 24) && /[。！？!?；;\n]|[，,、]/u.test(char)) return end;
   }
   return final ? end : 0;
 }
@@ -152,14 +153,23 @@ export function createCustomSpeechQueue(options: {
       const part = text.slice(0, 6000 - turn.received.length);
       turn.received += part;
       turn.buffer += part;
-      clearTimeout(turn.timer);
+      const wasFirst = turn.first;
+      if (!wasFirst) {
+        clearTimeout(turn.timer);
+        turn.timer = undefined;
+      }
       flush(turn);
-      if (turn.buffer)
+      if (wasFirst && !turn.first) {
+        clearTimeout(turn.timer);
+        turn.timer = undefined;
+      }
+      if (turn.buffer && (!turn.first || !turn.timer))
         turn.timer = setTimeout(
           () => {
-            if (valid(turn) && turn.buffer.length >= (turn.first ? 8 : 40)) flush(turn, true);
+            turn.timer = undefined;
+            if (valid(turn) && turn.buffer.length >= (turn.first ? 4 : 40)) flush(turn, true);
           },
-          turn.first ? 280 : 650,
+          turn.first ? 160 : 650,
         );
     },
     finish(fullText) {
@@ -191,7 +201,22 @@ export function createCustomSpeechOutput(options: {
   phase?(phase: CustomSpeechPhase): void;
   failure(): void;
 }): CustomSpeechQueue {
-  return createCustomSpeechQueue({
+  const owner = crypto.randomUUID();
+  const warmAbort = new AbortController();
+  let disposed = false;
+  let lastPrime = 0;
+  const prime = (): void => {
+    if (disposed || Date.now() - lastPrime < 700) return;
+    lastPrime = Date.now();
+    void fetch(ROUTE_SEGMENT + '/voice/warm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ voice: options.voice, owner, active: true }),
+      signal: AbortSignal.any([warmAbort.signal, AbortSignal.timeout(6000)]),
+    }).catch(() => {});
+  };
+  prime();
+  const queue = createCustomSpeechQueue({
     ...options,
     sink: {
       async synthesize(text, signal) {
@@ -211,4 +236,20 @@ export function createCustomSpeechOutput(options: {
       },
     },
   });
+  return {
+    ...queue,
+    prime,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      warmAbort.abort();
+      queue.dispose();
+      void fetch(ROUTE_SEGMENT + '/voice/warm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ voice: options.voice, owner, active: false }),
+        keepalive: true,
+      }).catch(() => {});
+    },
+  };
 }
