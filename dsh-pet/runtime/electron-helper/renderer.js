@@ -52,6 +52,7 @@ async function loadConfig() {
     font: (merged && merged.main && merged.main.font) || S.DEFAULT_FONT,
     // 语音：音色与音量（缺省由共享层按默认音色 / 最大音量处理）
     voiceName: (merged && merged.main && merged.main.voiceName) || '',
+    voiceNotifyEnabled: merged?.main?.voiceNotifyEnabled === true,
     // 音量只在播放入口用，缺省由共享层按最大音量处理，这里不兜 1
     voiceVolume: merged && merged.main ? merged.main.voiceVolume : undefined,
   };
@@ -67,6 +68,7 @@ async function boot() {
     S.setVoiceBase(BASE);
     S.setSurface('desktop');
     S.setVoiceConfig(cfg.voiceName, cfg.voiceVolume);
+    S.setVoiceNotifyEnabled(cfg.voiceNotifyEnabled);
     bootFailures = 0;
     hideError();
     // 字体族进 documentElement：对话窗/得分弹窗挂在 body 下、继承不到宠物根容器，只能走全局变量。

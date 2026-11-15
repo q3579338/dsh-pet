@@ -6,6 +6,7 @@
  * @module dsh-pet/src/host/plugin/chat-memory
  */
 import { join } from 'node:path';
+import { firstSpeechPart } from '../../shared/speech-parts.ts';
 import { generateChat, type ChatMemoryMessage } from '../chat.ts';
 import { chatActionNames } from '../chat-action.ts';
 import { currentEnvironment, type EnvironmentFacts } from '../environment.ts';
@@ -48,6 +49,8 @@ function voiceTargetFor(pet: Record<string, unknown>): VoiceTarget | undefined {
 
 /** 对话与记忆的输入：装配期对象与更早的工厂。 */
 export type ChatMemoryInput = {
+  /** 提前合成首句，与正常朗读共用缓存和在途请求。 */
+  warmVoice?: (text: string, voice?: string) => Promise<unknown>;
   /** 宿主上下文（apply 收到的那一个）。 */
   ctx: HostContext;
 } & Pick<HostSetup, 'configPaths'> &
@@ -357,7 +360,16 @@ export function createChatMemory(deps: ChatMemoryInput) {
         userText: text,
       });
       // 模型：条目配置的 chatModel 优先（留空 = 不指定）；生成侧失败会回落到当前对话的模型重试一次
+      let warmed = false;
       const generated = await generateChat({
+        onText: (draft) => {
+          if (warmed || cfg.main?.voiceEnabled !== true || !deps.warmVoice) return;
+          const first = firstSpeechPart(draft);
+          if (!first || /\[(?:图|动作):/u.test(first)) return;
+          warmed = true;
+          const voice = typeof cfg.main.voiceName === 'string' ? cfg.main.voiceName : undefined;
+          void deps.warmVoice(first, voice).catch(() => {});
+        },
         ctx,
         system: patch?.system ?? system,
         history: patch?.history ?? list,

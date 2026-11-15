@@ -70,6 +70,7 @@ function createMemory(
     records?: Array<{ petId: string; leaf: string; data: Record<string, unknown> }>;
   },
   captured?: Record<string, unknown>[],
+  extra?: Partial<ChatMemoryInput>,
 ) {
   return createChatMemory({
     ctx: fakeCtx(reply, captured),
@@ -85,6 +86,7 @@ function createMemory(
       },
     },
     userRoot: ws.userRoot,
+    ...extra,
   } as unknown as ChatMemoryInput);
 }
 
@@ -108,6 +110,38 @@ function readMessages(userRoot: string): ChatMemoryMessage[] {
 }
 
 describe('createChatMemory —— 图信息写入记忆文件', () => {
+  test('首句在模型写完之前预热，完整回复和记忆保持原文', { timeout: 3000 }, async () => {
+    const ws = tempWorkspace({ voiceEnabled: true, voiceName: 'edge/zh-CN-XiaoyiNeural' });
+    const first = '我现在就来陪着你。';
+    let release: () => void = () => {};
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    const warmed: string[] = [];
+    const ctx = fakeCtx('') as { llm: { stream: () => AsyncIterable<unknown> } };
+    ctx.llm.stream = async function* () {
+      yield { type: 'text-delta', index: 0, text: first };
+      await gate;
+      yield { type: 'text-delta', index: 0, text: '第二句也完整保留。' };
+    };
+    try {
+      const memory = createMemory('', ws, undefined, undefined, undefined, {
+        ctx: ctx as ChatMemoryInput['ctx'],
+        warmVoice: async (text, voice) => {
+          assert.equal(voice, 'edge/zh-CN-XiaoyiNeural');
+          warmed.push(text);
+          release();
+        },
+      });
+      const reply = await memory.chatWithPet('main', '测试');
+      assert.equal(reply.ok, true);
+      assert.deepEqual(warmed, [first]);
+      assert.equal(readMessages(ws.userRoot)[1].content, first + '第二句也完整保留。');
+    } finally {
+      release();
+      rmSync(ws.dir, { recursive: true, force: true });
+    }
+  });
   test('带图的一轮：user 原样记下附件引用，assistant 不凭空多出 meme 字段', async () => {
     const ws = tempWorkspace();
     try {

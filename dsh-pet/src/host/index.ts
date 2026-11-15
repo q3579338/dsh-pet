@@ -89,7 +89,24 @@ export function apply(ctx: any): void {
     const city = readAllConfig(configPaths).main?.environmentCity;
     return typeof city === 'string' && city.trim() !== '' ? city.trim() : undefined;
   });
-  const chatMemory = createChatMemory({ ctx, configPaths, log, memeDirsFor, playback, state, userRoot });
+  const voice = createVoiceService({
+    userRoot,
+    log,
+    configuredVoice: () => {
+      const selected = readAllConfig(configPaths).main?.voiceName;
+      return typeof selected === 'string' && selected ? selected : undefined;
+    },
+  });
+  const chatMemory = createChatMemory({
+    ctx,
+    configPaths,
+    log,
+    memeDirsFor,
+    playback,
+    state,
+    userRoot,
+    warmVoice: (text, selected) => voice.speak({ text, ...(selected ? { voice: selected } : {}) }),
+  });
   const { lastWhisperAt, publishWhisper, publishSleepTalk, chatWithPet, getActivePetId, setActivePetId } = chatMemory;
 
   const balancePoll = createBalancePoll({ ctx, configPaths, getActivePetId, log, state, standaloneAiBalance });
@@ -153,14 +170,7 @@ export function apply(ctx: any): void {
       }),
     // 语音合成：缓存落 userRoot，失败只留日志，不打断宿主。
     // 请求没带音色时用配置里的那个值——代码里没有第二份默认音色。
-    voice: createVoiceService({
-      userRoot,
-      log,
-      configuredVoice: () => {
-        const name = readAllConfig(configPaths).main?.voiceName;
-        return typeof name === 'string' && name ? name : undefined;
-      },
-    }),
+    voice,
     // 语音识别：实现来自注册表；请求没带 provider 时用配置里的那个值，没有第二份默认
     speech: createHearService({
       configuredProvider: () => {

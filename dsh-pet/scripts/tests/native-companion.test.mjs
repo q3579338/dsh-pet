@@ -22,9 +22,12 @@ test(
     await writeFile(
       join(run, 'home/dsh-pet/main-config.jsonc'),
       JSON.stringify({
-        pets: [{ id: 'main', display: 'desktop', whisperEnabled: false, balanceEnabled: false }],
+        pets: [
+          { id: 'main', display: 'desktop', whisperEnabled: false, balanceEnabled: false, workStatusEnabled: true },
+        ],
         trayEnabled: false,
         voiceEnabled: true,
+        voiceNotifyEnabled: true,
         voiceName: 'edge/zh-CN-XiaoyiNeural',
         speechProvider: 'windows',
         clickSoundEnabled: false,
@@ -76,6 +79,8 @@ test(
       assert.equal(report.nativeQuotaRead, true);
       assert.match(report.microphoneDeniedFeedback, /麦克风未获授权/);
       assert.equal(report.microphoneStability.length, 6);
+      assert.equal(report.workStatusSpeech.played, true);
+      assert.equal(report.workStatusSpeech.enabled, true);
       assert.equal(report.configuredVoice, 'edge/zh-CN-XiaoyiNeural');
       assert.equal(report.voicePreviews.length, 5);
       assert.equal(new Set(report.voicePreviews.map((preview) => preview.sha256)).size, 5);

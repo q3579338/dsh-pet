@@ -9,6 +9,7 @@
  */
 import { ROUTE_PATH } from './constants.ts';
 import type { VoiceTarget } from './state.ts';
+import { speechParts } from './speech-parts.ts';
 
 /** 当前音色；空串 = 不指定，由宿主用默认音色。 */
 let voiceName = '';
@@ -156,6 +157,11 @@ export function isVoiceNotifyEnabled(): boolean {
   return notifyEnabled;
 }
 
+/** 工作状态提示不能打断正在合成或播放的聊天、用户点播。 */
+export function isVoiceBusy(): boolean {
+  return autoSpeaking !== 0 || manualPending !== 0 || autoAudio !== null || manualAudio !== null;
+}
+
 /** 把音量收敛到 0–1；非数值按最大音量（1）处理——脏配置不该把声音悄悄变成 0。 */
 function clampVolume(value: unknown): number {
   const n = Number(value);
@@ -265,6 +271,9 @@ function waitForPlaybackEnd(audio: HTMLAudioElement, objectUrl: string): Promise
 let autoAudio: HTMLAudioElement | null = null;
 /** 自动播报世代号：合成期间可能被更新的一句顶掉，回来的旧结果直接丢弃。 */
 let autoSeq = 0;
+/** 当前自动朗读和请求；新句会取消旧合成，避免旧请求占住合成队列。 */
+let autoSpeaking = 0;
+let autoController: AbortController | null = null;
 
 /** 当前这句是否允许页面隐藏时继续播；跟随 autoAudio 一起换，不做成全局开关。 */
 let autoAudioCanPlayHidden = false;
@@ -276,6 +285,8 @@ let autoAudioCanPlayHidden = false;
  * 气泡能照常收起，不会等一个已经不会响的音频。
  */
 function stopAutoAudio(): void {
+  autoController?.abort();
+  autoController = null;
   const audio = autoAudio;
   // 标记无条件清掉：没有音频时也要清，否则下一句会被上一句的许可值带偏。
   autoAudio = null;
@@ -304,53 +315,67 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 async function speak(text: string, canPlayHidden = false): Promise<void> {
   const token = ++autoSeq;
   stopAutoAudio();
-  try {
-    const response = await fetch(voiceBase + '/voice/speak', {
+  const controller = new AbortController();
+  autoController = controller;
+  autoSpeaking = token;
+  const parts = speechParts(text);
+  const requestAudio = (part: string): Promise<Response | null> =>
+    fetch(voiceBase + '/voice/speak', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text, ...(voiceName ? { voice: voiceName } : {}) }),
-      signal: speakSignal(),
-    });
-    if (token !== autoSeq) return;
-    if (!response.ok || !(response.headers.get('content-type') ?? '').includes('audio')) {
-      setVoiceState('failed');
-      return;
-    }
-    const objectUrl = URL.createObjectURL(await response.blob());
-    if (token !== autoSeq) {
-      URL.revokeObjectURL(objectUrl);
-      return;
-    }
-    const audio = new Audio(objectUrl);
-    audio.volume = voiceVolume;
-    // 合成期间页面被藏起来：这一句不补播，直接丢掉——除非这句自带后台许可（通知类）。
-    if (!canPlayHidden && typeof document !== 'undefined' && document.hidden) {
-      URL.revokeObjectURL(objectUrl);
-      setVoiceState('idle');
-      return;
-    }
-    // 音频就绪即置 ready：喇叭表示「这句有语音」，不跟播放进度绑定
-    setVoiceState('ready');
-    autoAudioCanPlayHidden = canPlayHidden;
-    autoAudio = audio;
-    try {
-      await audio.play(); // 只代表开播：开播就失败要落到 failed，也不必再等收尾
-    } catch {
-      URL.revokeObjectURL(objectUrl);
-      if (autoAudio === audio) {
-        autoAudio = null;
-        autoAudioCanPlayHidden = false;
+      body: JSON.stringify({ text: part, ...(voiceName ? { voice: voiceName } : {}) }),
+      signal: AbortSignal.any([speakSignal(), controller.signal]),
+    }).catch(() => null);
+  try {
+    let pending = requestAudio(parts[0] ?? '');
+    for (let index = 0; index < parts.length; index++) {
+      const response = await pending;
+      if (token !== autoSeq) return;
+      if (!response?.ok || !(response.headers.get('content-type') ?? '').includes('audio')) {
+        setVoiceState('failed');
+        return;
       }
-      setVoiceState('failed');
-      return;
+      const objectUrl = URL.createObjectURL(await response.blob());
+      if (token !== autoSeq) {
+        URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      const audio = new Audio(objectUrl);
+      audio.volume = voiceVolume;
+      // 合成期间页面被藏起来：这一句不补播，直接丢掉——除非这句自带后台许可（通知类）。
+      if (!canPlayHidden && typeof document !== 'undefined' && document.hidden) {
+        URL.revokeObjectURL(objectUrl);
+        setVoiceState('idle');
+        return;
+      }
+      // 音频就绪即置 ready：喇叭表示「这句有语音」，不跟播放进度绑定
+      setVoiceState('ready');
+      autoAudioCanPlayHidden = canPlayHidden;
+      autoAudio = audio;
+      if (index + 1 < parts.length) pending = requestAudio(parts[index + 1]);
+      try {
+        await audio.play(); // 只代表开播：开播就失败要落到 failed，也不必再等收尾
+      } catch {
+        URL.revokeObjectURL(objectUrl);
+        if (autoAudio === audio) {
+          autoAudio = null;
+          autoAudioCanPlayHidden = false;
+        }
+        setVoiceState('failed');
+        return;
+      }
+      // 气泡靠 end 事件收起，所以必须等播完：停在「已经开播」会让气泡提早 1.5 秒消失
+      await waitForPlaybackEnd(audio, objectUrl);
+      if (autoAudio === audio) autoAudio = null;
     }
-    // 气泡靠 end 事件收起，所以必须等播完：停在「已经开播」会让气泡提早 1.5 秒消失
-    await waitForPlaybackEnd(audio, objectUrl);
-    if (autoAudio === audio) autoAudio = null;
   } catch {
     /* 含超时：气泡已经显示，失败也不能反过来打断渲染，只把图标换成静音喇叭 */
     // 旧请求的失败晚到不能覆盖新句状态：世代号已变就说明这句已经被顶掉。
     if (token === autoSeq) setVoiceState('failed');
+  } finally {
+    controller.abort();
+    if (autoSpeaking === token) autoSpeaking = 0;
+    if (autoController === controller) autoController = null;
   }
 }
 
@@ -362,6 +387,7 @@ export type SpeakPhase = 'idle' | 'loading' | 'playing' | 'failed';
 
 /** 手动点播的世代号：新的点播会作废旧请求的阶段回调，避免旧回调清掉新状态。 */
 let manualSeq = 0;
+let manualPending = 0;
 
 /**
  * 手动播报一句（对话面板的喇叭按钮用）。
@@ -386,6 +412,7 @@ async function playManual(text: string, onPhase?: (phase: SpeakPhase) => void): 
   }
   if (token !== manualSeq) return; // 等配置期间又被点了一次：这次直接让位
   onPhase?.('loading');
+  manualPending = token;
   try {
     const response = await fetch(voiceBase + '/voice/speak', {
       method: 'POST',
@@ -416,5 +443,7 @@ async function playManual(text: string, onPhase?: (phase: SpeakPhase) => void): 
   } catch {
     /* 含超时：面板里还有文字，不弹错误打断阅读，只把按钮换成失败态 */
     if (token === manualSeq) onPhase?.('failed');
+  } finally {
+    if (manualPending === token) manualPending = 0;
   }
 }

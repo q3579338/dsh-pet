@@ -229,7 +229,7 @@ describe('playSayVoice —— 这一句该不该念', () => {
 });
 
 describe('播放事件 —— 气泡靠它决定何时收起', () => {
-  test('念一句：报一次 start、一次 end，长句也整句送合成', async () => {
+  test('长句分段但不丢字，整个回复只报一对 start/end', async () => {
     const events: VoiceUtteranceEvent[] = [];
     const fetchStub = stubFetch();
     const browser = stubBrowser();
@@ -244,7 +244,8 @@ describe('播放事件 —— 气泡靠它决定何时收起', () => {
         events.map((event) => event.kind),
         ['start', 'end'],
       );
-      assert.equal(fetchStub.calls[0]?.text, text, '不截断：送合成的是气泡原文全句');
+      assert.equal(fetchStub.calls.map((call) => call.text).join(''), text, '全部分段还原原文');
+      assert.ok(fetchStub.calls.every((call) => call.text.length <= 100));
       assert.equal(events[0].text, text, '事件带原文：气泡要按它认句');
       assert.equal(events[0].seq, events[1].seq, '成对的同一句必须同序号');
     } finally {

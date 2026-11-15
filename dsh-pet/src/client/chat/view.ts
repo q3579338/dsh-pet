@@ -82,6 +82,16 @@ function listNode(rt: ChatPanelRuntime, state: ChatPanelState): unknown {
   if (cut !== null && state.memoryRounds !== undefined) {
     body.splice(cut, 0, memoryLineNode(rt.h, rt.t, state.memoryRounds));
   }
+  if (state.busy)
+    body.push(
+      rt.h('div', {
+        key: 'replying',
+        className: 'pet-chat-hint pet-chat-replying',
+        role: 'status',
+        'aria-live': 'polite',
+        children: rt.t('composerSending'),
+      }),
+    );
   return rt.h('div', {
     className: 'pet-chat-list',
     ref: state.listRef,

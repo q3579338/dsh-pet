@@ -155,6 +155,7 @@ export function createVoiceService(options: {
   staleWaitMs?: number;
 }): VoiceService {
   const { userRoot, log, configuredVoice } = options;
+  const inFlight = new Map<string, Promise<SpeakResult>>();
   const staleWaitMs = options.staleWaitMs ?? STALE_WAIT_MS;
   /** 已占用的队列名额（含正在跑的那个）。 */
   let queueUsed = 0;
@@ -266,6 +267,8 @@ export function createVoiceService(options: {
       log?.info?.(`[dsh-pet] voice speak: cache=hit chars=${call.text.length} voice=${call.resolved.limitedId}`);
       return { ok: true, file: cached, contentType: call.contentType };
     }
+    const existing = inFlight.get(call.target);
+    if (existing) return existing;
     if (queueUsed >= MAX_QUEUE) {
       log?.warn?.(
         `[dsh-pet] voice speak: queue full (max ${MAX_QUEUE}) chars=${call.text.length} ` +
@@ -273,7 +276,13 @@ export function createVoiceService(options: {
       );
       return { ok: false, reason: 'voice-busy', message: 'voice queue is full, retry later' };
     }
-    return runSynthesis(call);
+    const pending = runSynthesis(call);
+    inFlight.set(call.target, pending);
+    try {
+      return await pending;
+    } finally {
+      if (inFlight.get(call.target) === pending) inFlight.delete(call.target);
+    }
   }
 
   return { list: listCatalog, speak };

@@ -63,6 +63,24 @@ async function waitFor(check: () => boolean): Promise<void> {
   assert.fail('等待条件超时');
 }
 
+test('相同音色和正文的并发预热与播放只合成一次', async () => {
+  let calls = 0;
+  await withService(
+    async (voice) => {
+      const results = await Promise.all(Array.from({ length: 8 }, () => voice.speak({ text: '同一句预热和实际播放' })));
+      assert.ok(results.every((result) => result.ok));
+      assert.equal(calls, 1);
+    },
+    {
+      synthesize: async () => {
+        calls++;
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        return new Uint8Array([1]);
+      },
+    },
+  );
+});
+
 test('text 为空或全空白：判 bad-request 且不调用合成', () =>
   withService(
     async (voice) => {

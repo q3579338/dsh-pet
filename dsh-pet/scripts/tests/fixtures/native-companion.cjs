@@ -182,6 +182,18 @@ const guard = setTimeout(() => {
     await javascript(
       "(()=>{window.__petPlayed=0;const original=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){const audio=this.tagName==='AUDIO';return original.call(this).then(()=>{if(audio)window.__petPlayed++;});};})()",
     );
+    const statusStarted = Date.now();
+    await javascript("sprites[0].onWorkTick({state:'thinking',task:null},1)");
+    for (let i = 0; i < 100; i++) {
+      if (await javascript('window.__petPlayed>0')) break;
+      await wait(100);
+    }
+    report.workStatusSpeech = await javascript(
+      '({played:window.__petPlayed>0,enabled:PetShared.isVoiceNotifyEnabled(),text:sprites[0].workText})',
+    );
+    report.workStatusSpeech.firstAudioMs = Date.now() - statusStarted;
+    assert.equal(report.workStatusSpeech.played, true);
+    await javascript('sprites[0].onWorkTick({state:null,task:null},2);window.__petPlayed=0');
     await chatJs(
       "document.querySelector('.pet-chat-mic').dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:7,bubbles:true,cancelable:true}))",
     );
@@ -202,6 +214,7 @@ const guard = setTimeout(() => {
       "(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'连接测试，请只回复：我收到你的消息了。');input.dispatchEvent(new Event('input',{bubbles:true}));})()",
     );
     await wait(100);
+    const replyStarted = Date.now();
     await chatJs("document.querySelector('.pet-chat-send').click()");
     for (let i = 0; i < 300; i++) {
       if (await chatJs("Boolean(document.querySelector('.pet-chat-speak'))")) break;
@@ -212,11 +225,13 @@ const guard = setTimeout(() => {
     );
     assert.equal(report.reply.speaker, true);
     assert.equal(report.reply.hasReply, true);
+    report.replyVisibleMs = Date.now() - replyStarted;
     for (let i = 0; i < 80; i++) {
       if (await javascript('window.__petPlayed>0')) break;
       await wait(100);
     }
     report.automaticReplyPlayback = await javascript('window.__petPlayed');
+    report.firstReplyAudioMs = Date.now() - replyStarted;
     assert.ok(report.automaticReplyPlayback > 0);
     await chatJs(
       "(()=>{window.__nativePlayed=0;window.__nativePlayError='';const original=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){return original.call(this).then(()=>{window.__nativePlayed++;}).catch(error=>{window.__nativePlayError=error.name;throw error;});};document.querySelector('.pet-chat-speak').click();})()",

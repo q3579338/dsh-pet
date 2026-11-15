@@ -26,6 +26,7 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
     snapshot && typeof snapshot.sessionId === 'string' && snapshot.sessionId ? snapshot.sessionId : null;
   const stateChanged = this.prevWorkState !== state;
   this.prevWorkState = state;
+  if (!state) S.speakDesktopWorkStatus(null, null);
   if (!state) {
     // 回空闲：把正在循环播的进行中档位动画改成「播完即停」。进行中档位走 switchTo(name, false)
     // （loop=true），正常不触发 ended；这里不切动画，链就拿不到推进信号，
@@ -94,6 +95,8 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
   this.renderBubble();
   // 睡觉：气泡与 workState 已经更新，动画不换——自动来源不该打断睡姿（睡姿循环归睡觉状态机）。
   if (this.sleeping) return;
+  if (stateChanged && configuredText && this.workText === configuredText)
+    S.speakDesktopWorkStatus(state, configuredText);
   // 循环语义：终态播一遍回 idle；非终态多候选档位播一遍 → ended 轮换到下一候选；
   // 非终态单候选档位无限循环。
   const rotating = !terminal && Array.isArray(slot) && slot.length > 1;

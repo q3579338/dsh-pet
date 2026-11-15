@@ -96,6 +96,8 @@ function imageInstruction(pool: MemeEntry[]): string {
 
 /** 一次对话生成的输入。 */
 export interface ChatGenerateInput {
+  /** 已生成正文的旁路观察；用于提前合成首句，完整成功后才保存回复。 */
+  readonly onText?: (text: string) => void;
   /** 宿主上下文（注入 agentDefaultModel / llm）。 */
   readonly ctx: { agentDefaultModel: { currentSelection(): { provider: string; model: string } }; llm?: unknown };
   /** 人设提示词（whisperPrompt，与碎碎念共用同一人设）。 */
@@ -140,7 +142,17 @@ export async function generateChat(input: ChatGenerateInput): Promise<ChatGenera
   // 兜底文案与失败分支同源，避免两处字面量漂移
   let last: ChatGenerateResult = { ok: false, reason: 'generate-error', message: noTextReason(undefined) };
   for (const [i, sel] of candidates.entries()) {
-    const result = await generateWith(ctx, { llm, sel, system, history, userText, pool, actions, image });
+    const result = await generateWith(ctx, {
+      llm,
+      sel,
+      system,
+      history,
+      userText,
+      pool,
+      actions,
+      image,
+      onText: input.onText,
+    });
     if (result.ok) return result;
     last = result;
     // 回落要留痕：配的模型没生效时能在日志里看到原因（否则「我明明配了 A，怎么还是用 B」没法查）
@@ -156,6 +168,7 @@ export async function generateChat(input: ChatGenerateInput): Promise<ChatGenera
 
 /** 单个候选模型的一次生成请求（候选链的一环）。 */
 interface GenerateOnce {
+  readonly onText?: (text: string) => void;
   readonly llm: { stream(o: unknown): AsyncIterable<unknown> };
   readonly sel: ModelRef;
   readonly system: string;
@@ -224,9 +237,15 @@ async function generateWith(ctx: { llm?: unknown }, once: GenerateOnce): Promise
   };
 
   const assembler = new BlockAssembler();
+  let draft = '';
   try {
     for await (const chunk of llm.stream(options)) {
       assembler.push(chunk as Parameters<BlockAssembler['push']>[0]);
+      const part = chunk as { type?: unknown; text?: unknown } | null;
+      if ((part?.type === 'text' || part?.type === 'text-delta') && typeof part.text === 'string') {
+        draft += part.text;
+        once.onText?.(draft);
+      }
     }
   } catch (e) {
     return {
