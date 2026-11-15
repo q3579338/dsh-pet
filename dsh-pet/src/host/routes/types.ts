@@ -22,6 +22,7 @@ import type { VoiceTarget } from '../surface.ts';
 import type { TodoStore } from '../todo/store.ts';
 import type { HearService } from '../voice/hear.ts';
 import type { LiveVoiceService } from '../voice/live/service.ts';
+import type { VoiceConversationService } from '../voice/conversation.ts';
 import type { VoiceService } from '../voice/speak.ts';
 import type { WorkStatusStore } from '../work-status.ts';
 
@@ -168,4 +169,5 @@ export interface PetRouteDeps {
   readonly speech: HearService;
   /** Codex 独立模式的即时语音；其他宿主没有此能力时不开放连接。 */
   readonly liveVoice?: LiveVoiceService;
+  readonly voiceConversation?: VoiceConversationService;
 }

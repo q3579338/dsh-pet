@@ -31,6 +31,8 @@ import { ensureCuteVoices } from './voice/builtin-cute.ts';
 import { ensureWindowsSpeech } from './voice/windows/providers.ts';
 import { ensureCodexSpeech } from './voice/codex/provider.ts';
 import { createLiveVoiceService } from './voice/live/service.ts';
+import { createVoiceConversation } from './voice/conversation.ts';
+import type { StandaloneModelService } from '../standalone/llm-facade.ts';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { createVoiceService } from './voice/speak.ts';
 import { createHearService } from './voice/hear.ts';
@@ -154,6 +156,8 @@ export function apply(ctx: any): void {
     ensureDeepseekAsrProvider({ resolveKey: resolveDeepseekKey });
   }
 
+  let nativeVoiceActive = false,
+    workbuddyVoiceActive = false;
   const liveVoice =
     process.env.DSH_PET_CODEX === '1'
       ? createLiveVoiceService({
@@ -174,10 +178,45 @@ export function apply(ctx: any): void {
                 ).standaloneAi?.codexVoiceModel?.() ?? ctx.agentDefaultModel.currentSelection().model,
             };
           },
-          activeChanged: (active) => state.writeSection('voiceSession', { active }),
+          busy: () => workbuddyVoiceActive,
+          activeChanged: (active) => {
+            nativeVoiceActive = active;
+            state.writeSection('voiceSession', { active: nativeVoiceActive || workbuddyVoiceActive });
+          },
         })
       : undefined;
   ctx.effect(() => () => liveVoice?.dispose());
+  const voiceAi = (
+    ctx as {
+      standaloneAi?: Pick<StandaloneModelService, 'voiceSelection' | 'voiceStream' | 'isReady' | 'prepareVoice'>;
+    }
+  ).standaloneAi;
+  const voiceConversation =
+    process.env.DSH_PET_CODEX === '1' && voiceAi?.voiceStream
+      ? createVoiceConversation({
+          selection: () => voiceAi.voiceSelection?.(),
+          ready: () => voiceAi.isReady(),
+          prompt: (petId) => {
+            const found = findPetInstance(readAllConfig(configPaths), petId);
+            return found
+              ? composeSystemPrompt({
+                  prompt: petPersona(found.conf, found.pet),
+                  name: String(found.pet.name || petId),
+                  id: petId,
+                  now: new Date(),
+                })
+              : undefined;
+          },
+          stream: (model, request, signal) => voiceAi.voiceStream!(model, request, signal),
+          prepare: (active) => voiceAi.prepareVoice?.(active) ?? Promise.resolve(),
+          busy: () => nativeVoiceActive,
+          activeChanged: (active) => {
+            workbuddyVoiceActive = active;
+            state.writeSection('voiceSession', { active: nativeVoiceActive || workbuddyVoiceActive });
+          },
+        })
+      : undefined;
+  ctx.effect(() => () => voiceConversation?.dispose());
 
   const deps: PetRouteDeps = {
     ...setup,
@@ -201,6 +240,7 @@ export function apply(ctx: any): void {
     // 请求没带音色时用配置里的那个值——代码里没有第二份默认音色。
     voice,
     liveVoice,
+    voiceConversation,
     // 语音识别：实现来自注册表；请求没带 provider 时用配置里的那个值，没有第二份默认
     speech: createHearService({
       configuredProvider: () => {

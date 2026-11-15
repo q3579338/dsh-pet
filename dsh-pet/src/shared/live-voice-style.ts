@@ -27,7 +27,7 @@ export const LIVE_VOICE_STYLES = [
     synthesisVoice: 'bigfish-cute/dango-v1',
     instructions: '用标准普通话，简短自然地回答，语气轻快、有亲近感，不拖长语尾。',
   },
-  { id: 'natural', name: 'Codex 原声（最快）', synthesisVoice: undefined, instructions: '' },
+  { id: 'natural', name: 'Codex 原声', synthesisVoice: undefined, instructions: '' },
 ] as const;
 
 /** 星铃等使用实际在线调音合成；natural 保留原生音频。 */

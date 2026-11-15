@@ -8,10 +8,13 @@
 import type { RouteResult } from '../http.ts';
 import type { PetRouteDeps, RouteInput } from './types.ts';
 import { failResult, invalidJson, methodNotAllowed, okResult } from './result.ts';
+import { handleConversationRoutes } from './voice-conversation.ts';
 
 /** 语音领域：未命中返回 undefined，命中返回应答。 */
 export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): Promise<RouteResult | undefined> {
   const { body, method, rest, signal } = input;
+  const conversation = await handleConversationRoutes(deps, input);
+  if (conversation) return conversation;
 
   if (rest === 'voice/live/start' || rest === 'voice/live/touch' || rest === 'voice/live/stop') {
     if (method !== 'POST') return methodNotAllowed();

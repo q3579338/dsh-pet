@@ -285,6 +285,30 @@ if (require.main === module) {
     if (!process.stdout.write(JSON.stringify(value) + '\n')) await once(process.stdout, 'drain');
   };
   (async () => {
+    if (process.argv.includes('--session')) {
+      // 只复用网络连接；每次请求仍重新读取当前活动登录，不缓存账号令牌。
+      const { createInterface } = require('node:readline');
+      const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+      let previous = 0;
+      for await (const line of lines) {
+        if (line.length > 262144) throw failure('input');
+        const value = JSON.parse(line);
+        if (!Number.isSafeInteger(value.id) || value.id <= previous) throw failure('input');
+        previous = value.id;
+        const reply = (event) => emit({ id: value.id, event });
+        try {
+          await runRequest(value.input, reply);
+        } catch (error) {
+          await reply({
+            type: 'error',
+            code: ['auth', 'region', 'unsupported', 'model', 'quota', 'input'].includes(error?.publicCode)
+              ? error.publicCode
+              : 'upstream',
+          });
+        }
+      }
+      return;
+    }
     let bytes = 0;
     const chunks = [];
     for await (const part of process.stdin) {

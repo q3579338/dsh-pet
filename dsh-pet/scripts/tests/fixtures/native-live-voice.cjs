@@ -104,6 +104,12 @@ const guard = setTimeout(() => {
       assert.match(checked.reply, /连接成功/);
       assert.equal(checked.modelUsed, 'deepseek-v4-flash');
       report.workbuddyConnected = true;
+      // 本文件独立验收 Codex 原生通道；WorkBuddy 连续语音由专门的离屏用例验收。
+      await fetch(origin + '/standalone-ai/settings', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ protocol: 'codex', model: 'gpt-6-luna' }),
+      });
     }
     app.emit('codex-bigfish:chat');
     let chat;
@@ -342,6 +348,11 @@ const guard = setTimeout(() => {
     report.memoryUntouched = !fs.existsSync(memoryFile) || fs.readFileSync(memoryFile, 'utf8').trim() === '{}';
     assert.equal(report.memoryUntouched, true);
     if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
+      await fetch(origin + '/standalone-ai/settings', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ protocol: 'workbuddy', model: 'deepseek-v4-flash' }),
+      });
       await js(
         "(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'请用一句简短中文告诉我你准备好聊天了，句中包含连接成功四个字。');input.dispatchEvent(new Event('input',{bubbles:true}));})()",
       );
@@ -360,6 +371,15 @@ const guard = setTimeout(() => {
         "[...document.querySelectorAll('.pet-chat-msg.is-pet .pet-chat-bubble')].some(item=>item.textContent.includes('连接成功'))",
       );
       assert.equal(report.workbuddyChat, true, 'WorkBuddy must answer through the actual pet chat panel');
+      // 协议由测试通过本地接口改回 WorkBuddy；重载以读取新的已保存设置。
+      await new Promise((done) => {
+        chat.webContents.once('did-finish-load', done);
+        chat.webContents.reload();
+      });
+      for (let i = 0; i < 100; i++) {
+        if (await js("!!document.querySelector('.pet-chat-live-button')")) break;
+        await wait(100);
+      }
     }
     await js("document.querySelector('[data-tab=config]').click()");
     for (let i = 0; i < 100; i++) {

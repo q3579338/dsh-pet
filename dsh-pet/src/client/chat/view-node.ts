@@ -311,12 +311,12 @@ export function composerNode(
                   h('select', {
                     'aria-label': '语音聊天模式',
                     title:
-                      '原声直接播放，延迟更低；自定义音色使用星铃、糖芽、团子等实际音色，逐段合成播放。结束当前通话后可切换。',
+                      'Codex 原声直接播放；自定义音色跟随模型连接，选择 WorkBuddy 后使用其内置模型回答，再逐句朗读。结束当前通话后可切换。',
                     value: live.mode,
                     disabled: live.active,
                     onChange: (event: { target: { value: string } }) => live.chooseMode(event.target.value),
                     children: [
-                      h('option', { value: 'natural', children: '低延迟原声' }),
+                      h('option', { value: 'natural', children: 'Codex 原声' }),
                       h('option', { value: 'custom', children: '自定义音色' }),
                     ],
                   }),
@@ -394,7 +394,7 @@ export function composerNode(
                 ? h('div', {
                     className: 'pet-chat-live-note',
                     children: liveVoiceStyle(live.styleId)?.synthesisVoice
-                      ? '录音发送至 Codex/OpenAI，回复文字交给所选音色逐句朗读。字幕会先出现。本次字幕不写入普通聊天记忆。'
+                      ? 'Codex/OpenAI 识别语音；回答跟随模型连接（WorkBuddy 或 Codex），所选音色逐句朗读。字幕先出现，本次对话不写入普通聊天记忆。'
                       : '麦克风正在使用，语音发送至 Codex/OpenAI。本次直接播放 Codex 原声，字幕不写入普通聊天记忆。',
                   })
                 : null,

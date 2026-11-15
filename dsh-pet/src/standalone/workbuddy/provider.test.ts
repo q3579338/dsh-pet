@@ -114,3 +114,57 @@ test('WorkBuddy 登录失败保留可重试连接，不伪造成功或回显任�
     rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
   }
 });
+
+test('连续语音保留服务端型号、短句流式回答和取消；设置变化或底层错误不切换模型', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'fish-wb-live-service-'));
+  let bad = false,
+    calls = 0;
+  const ai = createStandaloneAi(
+    home,
+    { info() {}, warn() {}, error() {}, debug() {} },
+    {
+      workbuddy: {
+        models: async () => [],
+        test: async () => ({ reply: 'ok' }),
+        dispose() {},
+        async *stream(model, request, signal, maxTokens) {
+          calls++;
+          assert.equal(model, 'deepseek-v4-flash');
+          assert.equal(maxTokens, 256);
+          assert.equal(request.messages[0].content, '你好');
+          assert.equal(signal.aborted, false);
+          if (bad) throw Error('secret-internal-error');
+          yield { modelUsed: model };
+          yield { text: '来啦。' };
+        },
+      },
+    },
+  );
+  const collect = async (signal = new AbortController().signal) => {
+    const events = [];
+    for await (const event of ai.voiceStream!(
+      'deepseek-v4-flash',
+      { system: '大肥鱼', messages: [{ role: 'user', content: '你好' }] },
+      signal,
+    ))
+      events.push(event);
+    return events;
+  };
+  try {
+    await ai.saveSettings({ protocol: 'workbuddy', model: 'deepseek-v4-flash' });
+    assert.deepEqual(ai.voiceSelection?.(), { protocol: 'workbuddy', model: 'deepseek-v4-flash' });
+    assert.deepEqual(await collect(), [{ modelUsed: 'deepseek-v4-flash' }, { text: '来啦。' }]);
+    await assert.rejects(collect(AbortSignal.abort()), /已停止/u);
+    assert.equal(calls, 1);
+    bad = true;
+    await assert.rejects(collect(), (error) => error instanceof Error && !error.message.includes('secret'));
+    bad = false;
+    assert.equal((await collect()).length, 2);
+    await ai.saveSettings({ protocol: 'codex', model: 'gpt-6-luna' });
+    await assert.rejects(collect(), /模型设置/u);
+  } finally {
+    ai.dispose();
+    assert.ok(resolve(home).startsWith(resolve(tmpdir()) + sep));
+    rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  }
+});

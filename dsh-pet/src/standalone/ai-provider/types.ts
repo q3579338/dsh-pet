@@ -13,6 +13,8 @@ import type { CodexEventSink } from '../codex/events.ts';
 import type { StandaloneBalanceAuth } from '../../host/plugin/setup.ts';
 import type { CodexChatConnection } from '../codex/chat-connection.ts';
 import type { WorkBuddyConnection } from '../workbuddy/connection.ts';
+import type { AiRequest } from '../ai-transport.ts';
+import type { WorkBuddyEvent } from '../workbuddy/connection.ts';
 
 /** 设置存储：`createAiConfig` 的返回形状。 */
 export type AiStore = ReturnType<typeof createAiConfig>;
@@ -87,6 +89,9 @@ export interface StandaloneAiService {
   currentSelection(): { provider: string; model: string };
   /** 原生即时语音的 Codex 后端模型，不接收其它服务商的模型 ID。 */
   codexVoiceModel?(): string;
+  voiceSelection?(): { protocol: string; model: string };
+  voiceStream?(model: string, request: AiRequest, signal: AbortSignal): AsyncIterable<WorkBuddyEvent>;
+  prepareVoice?(active: boolean): Promise<void>;
   /** 就绪时返回唯一的 standalone 服务商。 */
   listProviders(): Array<{ id: string; name: string }>;
   /** 就绪时返回当前模型，否则为空。 */

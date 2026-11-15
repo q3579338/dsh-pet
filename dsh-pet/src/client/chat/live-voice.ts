@@ -7,6 +7,8 @@ import type { ChatPanelState } from './types.ts';
 import { createCustomSpeechOutput, type CustomSpeechQueue } from './custom-speech.ts';
 import { watchMicrophoneSpeech } from './microphone-activity.ts';
 import { assistantTranscriptDelta } from './live-transcript.ts';
+import { createWorkBuddyVoiceControl } from './workbuddy-voice.ts';
+import type { LiveControlOptions } from './live-voice-types.ts';
 
 /** 对话区只显示本次最近一轮字幕，不写入普通聊天存档。 */
 export interface LiveVoiceView {
@@ -44,7 +46,7 @@ function text(value: unknown): string {
 }
 
 /** 连接控制器的最小宿主，不依赖 React，方便验证真实媒体和取消路径。 */
-export function createLiveVoiceControl(options: {
+function createCodexLiveVoiceControl(options: {
   petId: string;
   changed(state: LiveData): void;
   canStart(): boolean;
@@ -67,6 +69,7 @@ export function createLiveVoiceControl(options: {
     stopMicWatch?: () => void;
     firstOutputAt?: number;
     reportedPlayback?: boolean;
+    speechFailed?: boolean;
     outputIds: Set<string>;
     assistantTurnId?: string;
   };
@@ -162,10 +165,13 @@ export function createLiveVoiceControl(options: {
           voice: selection.synthesisVoice,
           volume: playbackVolume,
           failure: () => {
-            if (relevant()) stop(selection.name + '暂时无法合成语音，请稍后重试或选择其他音色。');
+            if (relevant()) {
+              current.speechFailed = true;
+              paint({ message: selection.name + '这一句未能播放，文字已保留；可以继续说话重试。' });
+            }
           },
           phase: (phase) => {
-            if (!relevant()) return;
+            if (!relevant() || current.speechFailed) return;
             paint({
               message:
                 phase === 'preparing'
@@ -215,6 +221,7 @@ export function createLiveVoiceControl(options: {
             current.speech?.append(part);
           }
           if (value.type === 'turn.created' && turn.role === 'assistant') {
+            current.speechFailed = false;
             current.assistantTurnId = typeof turn.id === 'string' ? turn.id : undefined;
             paint({ pet: '' });
             current.outputIds.clear();
@@ -341,6 +348,70 @@ export function createLiveVoiceControl(options: {
       window.removeEventListener('pagehide', pageStop);
       document.removeEventListener('visibilitychange', hidden);
       document.removeEventListener('pet-stop-live-voice', pageStop);
+    },
+  };
+}
+
+/** 自定义音色跟随当前文字模型；低延迟原声保持明确的 Codex 原生路线。 */
+export function createLiveVoiceControl(options: LiveControlOptions): {
+  toggle(): void;
+  dispose(): void;
+  interrupt(): void;
+} {
+  let inner: ReturnType<typeof createCodexLiveVoiceControl> | undefined;
+  let selecting: AbortController | undefined;
+  let disposed = false;
+  return {
+    toggle() {
+      if (selecting) {
+        selecting.abort();
+        selecting = undefined;
+        options.changed({ ...EMPTY, message: '即时语音已取消。' });
+        return;
+      }
+      if (inner) {
+        inner.toggle();
+        return;
+      }
+      if (disposed || !options.canStart()) return;
+      const abort = new AbortController();
+      selecting = abort;
+      options.changed({ ...EMPTY, active: true, phase: 'connecting', message: '正在检查当前语音连接…' });
+      void (async () => {
+        const natural = options.style?.() === 'natural';
+        const value = natural
+          ? {}
+          : await fetch(ROUTE_SEGMENT + '/voice/conversation/options', { signal: abort.signal }).then((r) => r.json());
+        if (disposed || abort.signal.aborted) return;
+        const create = value.workbuddy === true ? createWorkBuddyVoiceControl : createCodexLiveVoiceControl;
+        inner = create({
+          ...options,
+          canStart: () => true,
+          changed: (state) => {
+            options.changed(state);
+            if (!state.active) {
+              const old = inner;
+              inner = undefined;
+              // 回调结束后再释放，避免在构造或停止过程中重入。
+              queueMicrotask(() => old?.dispose());
+            }
+          },
+        });
+        selecting = undefined;
+        inner.toggle();
+      })().catch(() => {
+        if (selecting === abort) selecting = undefined;
+        if (!disposed && !abort.signal.aborted) options.changed({ ...EMPTY, message: '未能读取模型连接，请重试。' });
+      });
+    },
+    interrupt() {
+      inner?.interrupt();
+    },
+    dispose() {
+      disposed = true;
+      selecting?.abort();
+      inner?.dispose();
+      inner = undefined;
     },
   };
 }

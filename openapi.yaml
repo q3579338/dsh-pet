@@ -2441,6 +2441,136 @@ paths:
               schema:
                 type: string
 
+  /dsh-pet-7340/voice/conversation/options:
+    get:
+      tags: [Voice]
+      operationId: voiceConversationOptions
+      summary: 查询当前是否使用 WorkBuddy 连续自定义语音
+      responses:
+        "200":
+          description: workbuddy 为是否选择该来源，model 为当前型号
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workbuddy: { type: boolean }
+                  model: { type: string }
+
+  /dsh-pet-7340/voice/conversation/start:
+    post:
+      tags: [Voice]
+      operationId: startVoiceConversation
+      summary: 沿用 Codex 流式听写和 WorkBuddy 内置模型开始连续聊天
+      description: 仅独立版提供。角色与模型从本机已保存设置读取，不接受请求指定地址或凭据。只允许一通；录音和本通上下文不写普通聊天记忆。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [petId, styleId]
+              properties:
+                petId: { type: string, maxLength: 200 }
+                styleId:
+                  { type: string, enum: [starbell, sugarbud, dango, moon] }
+      responses:
+        "200":
+          description: 成功返回 ok、sessionId、model；失败返回 ok:false、message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  sessionId: { type: string }
+                  model: { type: string }
+                  message: { type: string }
+
+  /dsh-pet-7340/voice/conversation/events:
+    get:
+      tags: [Voice]
+      operationId: voiceConversationEvents
+      summary: 订阅当前连续聊天的文字事件流
+      parameters:
+        - in: query
+          name: sessionId
+          required: true
+          schema: { type: string, pattern: '^[\w-]{1,80}$' }
+      responses:
+        "200":
+          description: 持续 NDJSON；ready、partial、user、reply、model、text、done、interrupted、error、ping。model 为实际服务端型号；断流释放本通。
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+            application/json:
+              schema: { $ref: "#/components/schemas/FailureResponse" }
+
+  /dsh-pet-7340/voice/conversation/audio:
+    post:
+      tags: [Voice]
+      operationId: appendVoiceConversationAudio
+      summary: 顺序追加16kHz单声道PCM16语音片段
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, utterance, sequence, audio]
+              properties:
+                sessionId: { type: string, pattern: '^[\w-]{1,80}$' }
+                utterance:
+                  {
+                    type: integer,
+                    minimum: 1,
+                    description: 每句话递增，已用编号不可重放,
+                  }
+                sequence:
+                  {
+                    type: integer,
+                    minimum: 0,
+                    description: 本句话内从0开始递增,
+                  }
+                audio:
+                  {
+                    type: string,
+                    maxLength: 22000,
+                    description: base64，解码不超过16384字节；一句不超过30秒,
+                  }
+      responses:
+        "200":
+          description: 接收返回 ok:true；顺序、会话或格式错误返回结构化失败
+
+  /dsh-pet-7340/voice/conversation/{command}:
+    post:
+      tags: [Voice]
+      operationId: controlVoiceConversation
+      summary: 结束一句、打断回复、续租或结束整通连续聊天
+      parameters:
+        - in: path
+          name: command
+          required: true
+          schema: { type: string, enum: [end, interrupt, touch, stop] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId]
+              properties:
+                sessionId: { type: string, pattern: '^[\w-]{1,80}$' }
+                utterance:
+                  {
+                    type: integer,
+                    minimum: 1,
+                    description: command=end时必填，结束指定这句听写,
+                  }
+      responses:
+        "200":
+          description: ok表示操作结果。touch每15秒续租，40秒未续租释放；stop幂等。
+
   /dsh-pet-7340/voice/live/start:
     post:
       tags: [Voice]

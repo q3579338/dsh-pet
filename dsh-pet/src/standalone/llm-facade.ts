@@ -8,6 +8,8 @@
 
 import type { CodexEventSink } from './codex/events.ts';
 import type { StandaloneBalanceAuth } from '../host/plugin/setup.ts';
+import type { AiRequest } from './ai-transport.ts';
+import type { WorkBuddyEvent } from './workbuddy/connection.ts';
 
 /** ctx.llm 替身的契约，形状必须与 DSH 一致。 */
 export interface StandaloneModelService {
@@ -16,6 +18,9 @@ export interface StandaloneModelService {
   currentSelection(): { provider: string; model: string };
   /** 即时语音独立使用 Codex 模型目录。 */
   codexVoiceModel?(): string;
+  voiceSelection?(): { protocol: string; model: string };
+  voiceStream?(model: string, request: AiRequest, signal: AbortSignal): AsyncIterable<WorkBuddyEvent>;
+  prepareVoice?(active: boolean): Promise<void>;
   listProviders(): unknown[];
   listModels(provider: string): Promise<unknown[]>;
   resolveModelInfo(provider?: string, model?: string, signal?: AbortSignal): Promise<unknown>;

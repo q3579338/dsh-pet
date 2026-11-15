@@ -25,6 +25,7 @@ import { createCodexAccountReader } from '../codex/account.ts';
 import type { BalanceResult } from '../../host/balance/types.ts';
 import { createWorkBuddyConnection } from '../workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../workbuddy/executable.ts';
+import { workBuddyVoiceStream } from './voice.ts';
 
 /**
  * 保存设置：单飞、先中止在途请求，失败即暂停，等下一次保存成功才恢复。
@@ -119,6 +120,13 @@ export function createStandaloneAi(
     },
     currentSelection: () => ({ provider: PROVIDER, model: runtime.ready() ? modelOf() : '' }),
     codexVoiceModel: () => (store.current().protocol === 'codex' ? modelOf() : 'default'),
+    voiceSelection: () => ({ protocol: store.current().protocol, model: modelOf() }),
+    voiceStream: (model, request, signal) => workBuddyVoiceStream(runtime, model, request, signal),
+    prepareVoice: async (active) => {
+      if (active && (!runtime.ready() || store.current().protocol !== 'workbuddy'))
+        throw new WorkBuddyFailure('请先选择 WorkBuddy 模型。');
+      await runtime.workbuddy?.prepareVoice?.(active);
+    },
     listProviders: () => (runtime.ready() ? [{ id: PROVIDER, name: 'Standalone AI' }] : []),
     listModels: async (provider) =>
       runtime.ready() && provider === PROVIDER ? [{ id: modelOf(), name: modelOf() }] : [],
