@@ -501,9 +501,10 @@ export const PANEL_CSS = `
   gap: ${px(SIZE.gap)};
 }
 
-.pet-chat-mic[data-hear="recording"] { color: var(--dsw-alias-label-error); font-weight: bold; }
-.pet-chat-hear-hint { color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12); overflow-wrap: anywhere; }
-.pet-chat-hear-hint:empty { display: none; }
+.pet-chat-mic { flex: 0 0 auto; }
+.pet-chat-mic[data-hear="recording"] { color: var(--dsw-alias-label-error); }
+.pet-chat-hear-hint { min-height: 3em; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xxs-12); line-height: 1.5; overflow-wrap: anywhere; }
+.pet-chat-hear-hint:empty { visibility: hidden; }
 
 .pet-chat-attach {
   display: inline-flex;

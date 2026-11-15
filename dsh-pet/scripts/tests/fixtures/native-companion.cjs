@@ -102,6 +102,31 @@ const guard = setTimeout(() => {
     assert.equal(report.chatReady.input, true);
     assert.equal(report.chatReady.microphone, true);
     assert.deepEqual(report.chatReady.errors, []);
+    await chatJs('document.fonts.ready.then(() => true)');
+    const microphoneBounds = () =>
+      chatJs(
+        "(()=>{const rect=document.querySelector('.pet-chat-mic').getBoundingClientRect();return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};})()",
+      );
+    const idleBounds = {};
+    for (const width of [680, 400]) {
+      chat.setSize(width, 800);
+      await wait(100);
+      idleBounds[width] = await microphoneBounds();
+    }
+    report.microphoneStability = [];
+    const checkMicrophoneBounds = async (state) => {
+      for (const width of [680, 400]) {
+        chat.setSize(width, 800);
+        await wait(100);
+        const bounds = await microphoneBounds();
+        report.microphoneStability.push({ state, width, idle: idleBounds[width], bounds });
+        for (const field of ['x', 'y', 'width', 'height'])
+          assert.ok(
+            Math.abs(bounds[field] - idleBounds[width][field]) <= 0.5,
+            `Microphone ${field} moved during ${state} at ${width}px`,
+          );
+      }
+    };
     await javascript(
       "document.querySelector('.pet-hit').dispatchEvent(new MouseEvent('dblclick',{bubbles:true,cancelable:true}))",
     );
@@ -114,6 +139,7 @@ const guard = setTimeout(() => {
     await wait(150);
     report.microphoneDeniedFeedback = await chatJs("document.querySelector('.pet-chat-hear-hint').textContent");
     assert.match(report.microphoneDeniedFeedback, /麦克风未获授权/);
+    await checkMicrophoneBounds('denied');
     await chatJs(
       "document.querySelector('.pet-chat-mic').dispatchEvent(new PointerEvent('pointerup',{button:0,pointerId:8,bubbles:true}));window.__restoreMic();",
     );
@@ -123,7 +149,9 @@ const guard = setTimeout(() => {
     await chatJs(
       "document.querySelector('.pet-chat-mic').dispatchEvent(new PointerEvent('pointerdown',{button:0,pointerId:7,bubbles:true,cancelable:true}))",
     );
-    await wait(4000);
+    await wait(200);
+    await checkMicrophoneBounds('recording');
+    await wait(3600);
     await chatJs(
       "document.querySelector('.pet-chat-mic').dispatchEvent(new PointerEvent('pointerup',{button:0,pointerId:7,bubbles:true,cancelable:true}))",
     );
@@ -133,6 +161,7 @@ const guard = setTimeout(() => {
     }
     report.transcript = await chatJs("document.querySelector('textarea.pet-chat-input').value");
     assert.match(report.transcript, /天气/);
+    await checkMicrophoneBounds('recognized');
     await chatJs(
       "(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'连接测试，请只回复：我收到你的消息了。');input.dispatchEvent(new Event('input',{bubbles:true}));})()",
     );

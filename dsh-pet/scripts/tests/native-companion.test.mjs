@@ -75,6 +75,7 @@ test(
       assert.ok(report.playback.played > 0);
       assert.equal(report.nativeQuotaRead, true);
       assert.match(report.microphoneDeniedFeedback, /麦克风未获授权/);
+      assert.equal(report.microphoneStability.length, 6);
       assert.ok(!report.responses.some((item) => item.status === 401 || item.status === 403));
       const evidence = process.env.DSH_PET_NATIVE_COMPANION_EVIDENCE;
       if (evidence) {
