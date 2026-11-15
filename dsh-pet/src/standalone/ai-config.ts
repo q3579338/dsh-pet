@@ -138,8 +138,19 @@ export function validateSettings(input: unknown, previous: Readonly<StandaloneAi
     const { clearApiKey, clearDeepseekKey, ...values } = patch;
     const apiKey = clearApiKey ? '' : values.apiKey || previous.apiKey;
     const deepseekApiKey = clearDeepseekKey ? '' : values.deepseekApiKey || previous.deepseekApiKey;
+    // 来源改变但未提交模型时，不能沿用另一家的模型 ID；同来源的小补丁保留已选模型。
+    const protocol = values.protocol ?? previous.protocol;
+    const model =
+      values.model ??
+      (protocol === previous.protocol
+        ? previous.model
+        : protocol === 'codex'
+          ? 'default'
+          : protocol === 'workbuddy'
+            ? 'deepseek-v4-flash'
+            : '');
     // 配置填一半只是暂时不可用，不该连保存都拒绝；启用位不再有语义，一律写回 true。
-    return persistedSchema.parse({ ...previous, ...values, apiKey, deepseekApiKey, enabled: true });
+    return persistedSchema.parse({ ...previous, ...values, model, apiKey, deepseekApiKey, enabled: true });
   } catch {
     throw new Error('Invalid standalone AI settings.');
   }

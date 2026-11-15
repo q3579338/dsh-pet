@@ -1,10 +1,18 @@
 /** 一次合成的有界字节缓冲：同一任务可同时供完整缓存和多个流式订阅者读取。 */
 export class SpeechStreamHub {
-  private chunks: Uint8Array[] = [];
-  private size = 0;
-  private ended = false;
-  private failed = false;
-  private listeners = new Set<() => void>();
+  declare private chunks: Uint8Array[];
+  declare private size: number;
+  declare private ended: boolean;
+  declare private failed: boolean;
+  declare private listeners: Set<() => void>;
+
+  constructor() {
+    this.chunks = [];
+    this.size = 0;
+    this.ended = false;
+    this.failed = false;
+    this.listeners = new Set();
+  }
 
   /** 缓冲区只属于这次任务，防止异常实现无限返回数据。 */
   push(bytes: Uint8Array): void {

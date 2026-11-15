@@ -13,6 +13,16 @@ const configured = {
   enabled: true,
 };
 
+test('只切换来源的设置补丁不能继承另一家的模型，显式模型仍按选择保存', () => {
+  const codex = validateSettings({ protocol: 'codex', model: 'gpt-6.1-sol' }, DEFAULT_AI_SETTINGS);
+  const workbuddy = validateSettings({ protocol: 'workbuddy' }, codex);
+  assert.equal(workbuddy.model, 'deepseek-v4-flash');
+  assert.equal(validateSettings({ protocol: 'codex' }, workbuddy).model, 'default');
+  assert.equal(validateSettings({ protocol: 'anthropic' }, codex).model, '');
+  assert.equal(validateSettings({ protocol: 'workbuddy', model: 'chosen-built-in' }, codex).model, 'chosen-built-in');
+  assert.equal(validateSettings({ timeoutMs: 5000 }, codex).model, 'gpt-6.1-sol');
+});
+
 test('validates safe endpoints and explicit configuration with fixed redacted errors', () => {
   for (const baseUrl of [
     'ftp://example.test',

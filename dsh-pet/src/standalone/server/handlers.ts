@@ -141,15 +141,25 @@ export function balanceHandler(
       sendJson(res, 200, { ok: false, provider: '', reason: 'unsupported' });
       return;
     }
+    let body: unknown;
     try {
-      const raw = asDraft(await readJsonBody(req));
-      if (
-        raw.protocol !== undefined &&
-        !['codex', 'workbuddy', 'openai-compatible', 'anthropic'].includes(raw.protocol)
-      ) {
-        sendJson(res, 400, { ok: false, reason: 'bad-request', message: '查询来源无效。' });
-        return;
-      }
+      body = await readJsonBody(req);
+    } catch {
+      sendJson(res, 400, { ok: false, reason: 'bad-request', message: '查询来源无效。' });
+      return;
+    }
+    const raw = asDraft(body);
+    if (
+      !body ||
+      typeof body !== 'object' ||
+      Array.isArray(body) ||
+      Object.keys(body).some((key) => key !== 'protocol') ||
+      (raw.protocol !== undefined && !['codex', 'workbuddy', 'openai-compatible', 'anthropic'].includes(raw.protocol))
+    ) {
+      sendJson(res, 400, { ok: false, reason: 'bad-request', message: '查询来源无效。' });
+      return;
+    }
+    try {
       sendJson(res, 200, await ai.queryBalance(raw.protocol ? { protocol: raw.protocol } : undefined));
     } catch {
       sendJson(res, 200, { ok: false, provider: '', reason: 'fetch-error', message: '余额查询失败' });

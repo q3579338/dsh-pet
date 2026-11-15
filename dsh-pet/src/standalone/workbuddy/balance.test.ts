@@ -31,7 +31,7 @@ test('余额查询按本次明确选择的来源，未保存的界面切换也�
         }),
         balance: async () => {
           calls.push('workbuddy');
-        return { plan: '测试套餐', total: 10000, left: 8765.43, used: 1234.57 };
+          return { plan: '测试套餐', total: 10000, left: 8765.43, used: 1234.57 };
         },
       },
     },

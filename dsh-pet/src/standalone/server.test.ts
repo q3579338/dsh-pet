@@ -435,6 +435,47 @@ describe('HTTP boundary protects every route and settings', () => {
       await server.close();
     }
   });
+  test('余额查询拒绝损坏或含未知字段的请求，不得意外查询已保存的另一家', async () => {
+    const queried: Array<string | undefined> = [];
+    const server = await listenStandaloneServer({
+      port: 0,
+      security,
+      logger: silent,
+      routes: [],
+      ai: {
+        getSettings: () => ({}),
+        saveSettings: async () => ({}),
+        queryBalance: async (input) => {
+          queried.push(input?.protocol);
+          return { ok: true, provider: input?.protocol ?? 'saved' };
+        },
+      },
+    });
+    try {
+      const url = `http://127.0.0.1:${server.port}/standalone-ai/balance`;
+      const headers = { 'X-DSH-Pet-Token': security.token, 'Content-Type': 'application/json' };
+      for (const body of [
+        '{',
+        'null',
+        '[]',
+        '"workbuddy"',
+        '{"source":"workbuddy"}',
+        '{"protocol":false}',
+        '{"protocol":"unknown"}',
+      ]) {
+        const response = await fetch(url, { method: 'POST', headers, body });
+        assert.equal(response.status, 400, body);
+        assert.equal((await response.json()).reason, 'bad-request');
+        assert.deepEqual(queried, []);
+      }
+      for (const body of ['', '{}', '{"protocol":"codex"}', '{"protocol":"workbuddy"}']) {
+        assert.equal((await fetch(url, { method: 'POST', headers, body })).status, 200);
+      }
+      assert.deepEqual(queried, [undefined, undefined, 'codex', 'workbuddy']);
+    } finally {
+      await server.close();
+    }
+  });
   test('even delegated plugin bodies are capped before handler invocation', async () => {
     let calls = 0;
     const server = await listenStandaloneServer({

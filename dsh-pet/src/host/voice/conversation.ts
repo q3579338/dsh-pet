@@ -245,7 +245,9 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         return {
           ok: false,
           message:
-            error instanceof WorkBuddyFailure ? error.message : '流式语音识别未能连接，请检查 Codex 登录和网络后重试。',
+            error instanceof WorkBuddyFailure
+              ? error.message
+              : '流式语音识别未能连接，请检查国内版 WorkBuddy 登录和网络后重试。',
         };
       } finally {
         signal?.removeEventListener('abort', cancel);

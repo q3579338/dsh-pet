@@ -11,7 +11,8 @@
  */
 import { beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -108,6 +109,77 @@ function readMessages(userRoot: string): ChatMemoryMessage[] {
   assert.ok(bucket && buckets.length === 1, '应当只写入一只宠物的记忆');
   return bucket.messages;
 }
+
+describe('createChatMemory —— 存档保护', () => {
+  for (const raw of ['{"main":', '[]', 'null', '{"main": []}', '{"main":{"main":{"messages":null}}}']) {
+    test('异常记忆不能被下一轮聊天覆盖：' + raw, async () => {
+      const ws = tempWorkspace();
+      mkdirSync(ws.userRoot, { recursive: true });
+      const path = join(ws.userRoot, 'memory.json');
+      writeFileSync(path, raw);
+      const requests: Record<string, unknown>[] = [];
+      try {
+        await assert.rejects(
+          createMemory('新回复', ws, undefined, undefined, requests).chatWithPet('main', '新问题'),
+          /记忆/,
+        );
+        assert.equal(readFileSync(path, 'utf8'), raw, '异常原文件必须逐字保留');
+        assert.equal(requests.length, 0, '确认记忆可读前不能发送聊天');
+      } finally {
+        rmSync(ws.dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test('读取 IO 错误不能假装没有历史；恢复文件后同一实例可继续聊天', async () => {
+    const ws = tempWorkspace();
+    const path = join(ws.userRoot, 'memory.json');
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'keep.txt'), '不得删除');
+    const requests: Record<string, unknown>[] = [];
+    const memory = createMemory('恢复后的回复', ws, undefined, undefined, requests);
+    try {
+      await assert.rejects(memory.chatWithPet('main', '不能开始'), /记忆/);
+      assert.equal(requests.length, 0);
+      assert.equal(readFileSync(join(path, 'keep.txt'), 'utf8'), '不得删除');
+      rmSync(path, { recursive: true });
+      writeFileSync(path, '{"main":{"main":{"messages":[{"role":"user","content":"旧记录","ts":1}]}}}');
+      assert.equal((await memory.chatWithPet('main', '恢复后')).ok, true);
+      assert.equal(readMessages(ws.userRoot)[0].content, '旧记录');
+    } finally {
+      rmSync(ws.dir, { recursive: true, force: true });
+    }
+  });
+
+  test('较大历史的并发读取只能看到完整旧档或完整新档，写完不留临时文件', async () => {
+    const ws = tempWorkspace();
+    mkdirSync(ws.userRoot, { recursive: true });
+    const path = join(ws.userRoot, 'memory.json');
+    const old = { role: 'user', content: '旧'.repeat(300_000), ts: 1 };
+    writeFileSync(path, JSON.stringify({ main: { main: { messages: [old] } } }));
+    let done = false;
+    const writes = createMemory('新答复', ws)
+      .chatWithPet('main', '新问题')
+      .finally(() => {
+        done = true;
+      });
+    void writes.catch(() => {});
+    try {
+      do {
+        const snapshot = JSON.parse(await readFile(path, 'utf8'));
+        const list = snapshot.main.main.messages;
+        assert.equal(list[0].content, old.content);
+        assert.ok(list.length === 1 || list.length === 3);
+      } while (!done);
+      assert.equal((await writes).ok, true);
+      assert.equal(readMessages(ws.userRoot).length, 3);
+      assert.deepEqual(readdirSync(ws.userRoot), ['memory.json']);
+    } finally {
+      await writes.catch(() => {});
+      rmSync(ws.dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('createChatMemory —— 图信息写入记忆文件', () => {
   test('首句在模型写完之前预热，完整回复和记忆保持原文', { timeout: 3000 }, async () => {

@@ -21,18 +21,25 @@ export function codexRecord(value: unknown): Record<string, unknown> {
 
 /** 一个 app-server 进程与其未完成请求。 */
 export class CodexClient {
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly pending = new Map<
+  declare private readonly child: ChildProcessWithoutNullStreams;
+  declare private readonly pending: Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
-  >();
-  private readonly listeners = new Set<(notification: CodexNotification) => void>();
-  private readonly closeListeners = new Set<(error: Error) => void>();
-  private sequence = 0;
-  private carry = '';
-  private closed = false;
+  >;
+  declare private readonly listeners: Set<(notification: CodexNotification) => void>;
+  declare private readonly closeListeners: Set<(error: Error) => void>;
+  declare private sequence: number;
+  declare private carry: string;
+  declare private closed: boolean;
 
   constructor(cwd: string, executable = resolveCodexExecutable(), args = ['app-server', '--listen', 'stdio://']) {
+    // 插件仍编译到 es2020；构造器赋值避免生成未随包提供的类字段 helper。
+    this.pending = new Map();
+    this.listeners = new Set();
+    this.closeListeners = new Set();
+    this.sequence = 0;
+    this.carry = '';
+    this.closed = false;
     this.child = spawn(executable, args, {
       cwd,
       stdio: 'pipe',

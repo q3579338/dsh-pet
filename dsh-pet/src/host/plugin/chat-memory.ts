@@ -6,11 +6,13 @@
  * @module dsh-pet/src/host/plugin/chat-memory
  */
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { firstSpeechPart } from '../../shared/speech-parts.ts';
 import { generateChat, type ChatMemoryMessage } from '../chat.ts';
 import { chatActionNames } from '../chat-action.ts';
 import { currentEnvironment, type EnvironmentFacts } from '../environment.ts';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { composeSystemPrompt, petPersona } from '../persona.ts';
 import { findPetInstance, readAllConfig, removeRoundsByTs, sliceMemoryRounds } from '../config.ts';
 import type { PetImageRef } from '../image-attachment.ts';
@@ -79,29 +81,60 @@ export function createChatMemory(deps: ChatMemoryInput) {
   // 对话写操作串行队列：read-modify-write 排队执行，防两端同时对话时交错写盘
   let chatQueue: Promise<void> = Promise.resolve();
 
-  /** 读记忆文件：不存在 → 空；解析失败/根不是对象 → 记日志 + 空记忆（不备份、不改写源文件） */
+  /** 只有文件不存在才视为空；无法确认旧记录时拒绝读改写，保留原文件。 */
   const readMemory = async (): Promise<Record<string, Record<string, { messages: ChatMemoryMessage[] }>>> => {
     let raw: string;
     try {
       raw = await readFile(memoryPath, 'utf8');
-    } catch {
-      return {}; // 文件不存在 = 尚无记忆
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      log.error(`dsh-pet: 记忆文件读取失败，已停止写入：${memoryPath}`);
+      throw new Error('聊天记忆暂时无法读取，已保留原文件，请稍后重试。', { cause: error });
     }
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
       return parsed as Record<string, Record<string, { messages: ChatMemoryMessage[] }>>;
-    } catch (e) {
-      log.error(
-        `dsh-pet: 记忆文件无法解析（对话将从头开始）：${memoryPath}（${e instanceof Error ? e.message : String(e)}）`,
-      );
-      return {};
+    } catch {
+      log.error(`dsh-pet: 记忆文件无法解析，已停止写入：${memoryPath}`);
+      throw new Error('聊天记忆文件损坏，已保留原文件，请先恢复备份后再试。');
     }
   };
 
   const writeMemory = async (mem: Record<string, Record<string, { messages: ChatMemoryMessage[] }>>): Promise<void> => {
     await mkdir(userRoot, { recursive: true });
-    await writeFile(memoryPath, JSON.stringify(mem, null, 2), 'utf8');
+    // 先完整写入同目录独占临时文件，再原子替换；读者和进程退出都不会留下半截 JSON。
+    const temporary = memoryPath + '.' + randomUUID() + '.tmp';
+    let owned = false;
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      file = await open(temporary, 'wx', 0o600);
+      owned = true;
+      await file.writeFile(JSON.stringify(mem, null, 2), 'utf8');
+      await file.sync();
+      await file.close();
+      file = undefined;
+      // Windows 的并发读句柄或扫描器可能短暂占用旧档；只重试替换，绝不先删除旧档。
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await rename(temporary, memoryPath);
+          break;
+        } catch (error) {
+          if (
+            process.platform !== 'win32' ||
+            attempt >= 6 ||
+            !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')
+          )
+            throw error;
+          await delay(20 * (attempt + 1));
+        }
+      }
+    } catch (error) {
+      throw new Error('聊天记忆未能保存，原有记录已保留，请稍后重试。', { cause: error });
+    } finally {
+      await file?.close().catch(() => {});
+      if (owned) await unlink(temporary).catch(() => {});
+    }
   };
 
   /** 把一次读写封进串行队列（同进程内防交错），返回 fn 的结果 */
@@ -330,16 +363,19 @@ export function createChatMemory(deps: ChatMemoryInput) {
       // 动作名单：开关开启才取（关掉 = 不注入也不解析）；名单本身为空（没配 categories）同样等于关闭。
       const actions = found.conf.chatAnimationEnabled === true ? chatActionNames(found.conf.animations) : [];
       const mem = await readMemory();
-      // 坏结构（数组/标量）按空桶重建；messages 不是数组的条目按新会话处理，避免 push 到坏对象上崩溃
-      const bucket =
-        mem[found.entry] && typeof mem[found.entry] === 'object' && !Array.isArray(mem[found.entry])
-          ? mem[found.entry]
-          : (mem[found.entry] = {});
-      const existing = bucket[petId];
-      if (existing !== undefined && (!existing || !Array.isArray(existing.messages))) {
-        log.error(`[dsh-pet] 记忆结构异常（messages 不是数组）pet=${petId}，按新会话处理：${memoryPath}`);
+      const savedBucket = mem[found.entry];
+      if (
+        savedBucket !== undefined &&
+        (!savedBucket || typeof savedBucket !== 'object' || Array.isArray(savedBucket))
+      ) {
+        throw new Error('聊天记忆结构异常，已保留原文件，请先恢复备份后再试。');
       }
-      const entry = existing && Array.isArray(existing.messages) ? existing : (bucket[petId] = { messages: [] });
+      const bucket = savedBucket ?? (mem[found.entry] = {});
+      const existing = bucket[petId];
+      if (existing !== undefined && (!existing || Array.isArray(existing) || !Array.isArray(existing.messages))) {
+        throw new Error('聊天记忆结构异常，已保留原文件，请先恢复备份后再试。');
+      }
+      const entry = existing ?? (bucket[petId] = { messages: [] });
       // rounds = 0（用户关掉历史）→ 空历史；否则截尾部 rounds 轮（1 轮 = 1 问 1 答）。
       // 不能写 slice(-rounds * 2)：-0 在 JS 里 === 0，slice(-0) 返回整个数组而不是空。
       const list = sliceMemoryRounds(entry.messages, rounds);

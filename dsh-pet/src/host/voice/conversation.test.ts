@@ -84,6 +84,34 @@ async function fixture() {
     },
   };
 }
+test('WorkBuddy 识别启动失败提示自己的来源，不显示原始错误或 Codex 登录提示', async () => {
+  const states: boolean[] = [];
+  const service = createVoiceConversation({
+    selection: () => ({ protocol: 'workbuddy', model: 'deepseek-v4-flash' }),
+    ready: () => true,
+    prompt: () => '大肥鱼',
+    activeChanged: (active) => {
+      states.push(active);
+    },
+    dictation: async () => {
+      throw new Error('private upstream error');
+    },
+    async *stream() {
+      yield { text: '不应调用' };
+    },
+  });
+  try {
+    const result = await service.start('fish', 'starbell');
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(result.message, /WorkBuddy/);
+      assert.doesNotMatch(result.message, /Codex|private/);
+    }
+    assert.deepEqual(states, [true, false]);
+  } finally {
+    service.dispose();
+  }
+});
 test('连续两轮使用实际选中模型和角色，流式文字与最终听写分开，历史只驻留本通', async () => {
   const f = await fixture();
   try {
