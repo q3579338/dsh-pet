@@ -1,6 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assistantTranscriptDelta, createAssistantTranscript } from './live-transcript.ts';
+import { assistantTranscriptDelta, createAssistantTranscript, createUserTranscript } from './live-transcript.ts';
+
+test('用户分段字幕、同编号修订和末尾句号合并，下一次真实发言独立', () => {
+  const input = createUserTranscript();
+  input.begin();
+  assert.equal(input.append({ id: 'a', text: '我喜欢' }), '我喜欢');
+  assert.equal(input.append({ id: 'b', text: '喝咖啡' }), '我喜欢喝咖啡');
+  assert.equal(input.append({ id: 'b', text: '喝咖啡' }), '我喜欢喝咖啡');
+  input.begin();
+  assert.equal(input.append({ id: 'c', text: '。' }), '我喜欢喝咖啡。');
+  assert.equal(input.append({ id: 'd', text: '你好' }), '你好');
+  assert.equal(input.complete('你好。'), '你好。');
+  assert.equal(input.append({ id: 'e', text: '再见' }), '再见');
+});
+
+test('真实协议在创建事件已带首批文字，后续增量接续且双通道不重读', () => {
+  const stream = createAssistantTranscript();
+  let spoken = stream.accept({
+    type: 'turn.created',
+    turn: { id: 'a', role: 'assistant', transcript: '嗯,咖啡' },
+  }).delta;
+  assert.equal(spoken, '嗯,咖啡');
+  assert.deepEqual(stream.accept({ type: 'output_transcript.added', item: { id: 'late', text: '咖啡' } }), {});
+  for (const delta of ['真', '香', '。', '哈哈！'])
+    spoken += stream.accept({ type: 'turn.delta', turn_id: 'a', delta }).delta ?? '';
+  assert.equal(spoken, '嗯,咖啡真香。哈哈！');
+  assert.equal(
+    stream.accept({ type: 'turn.done', turn: { id: 'a', role: 'assistant', transcript: spoken } }).full,
+    spoken,
+  );
+});
 
 test('当前助手轮的逐字增量可提前朗读；用户轮、旧轮和非文本事件不进入音频', () => {
   assert.equal(

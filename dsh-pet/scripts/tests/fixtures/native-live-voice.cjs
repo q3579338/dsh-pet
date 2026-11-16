@@ -70,7 +70,10 @@ const guard = setTimeout(() => {
     const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ text: '测试。', voice: 'windows/zh-CN' }),
+      body: JSON.stringify({
+        text: process.env.DSH_PET_MEMORY_PROBE === '1' ? '我喜欢喝咖啡。' : '测试。',
+        voice: 'windows/zh-CN',
+      }),
     });
     assert.equal(sample.status, 200);
     const b64 = Buffer.from(await sample.arrayBuffer()).toString('base64');
@@ -82,7 +85,7 @@ const guard = setTimeout(() => {
       })
     ).json();
     assert.equal(dictation.ok, true, dictation.message);
-    assert.match(dictation.text, /测试/);
+    assert.match(dictation.text, process.env.DSH_PET_MEMORY_PROBE === '1' ? /我喜欢.*咖啡/ : /测试/);
     report.dictation = dictation.text;
     if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
       const selected = await (
@@ -116,7 +119,11 @@ const guard = setTimeout(() => {
       await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ text: '用户希望被称为「记忆测试星」', kind: 'profile' }),
+        body: JSON.stringify(
+          process.env.DSH_PET_MEMORY_PROBE === '1'
+            ? { text: '用户喜欢记忆测试星', kind: 'preference' }
+            : { text: '用户希望被称为「记忆测试星」', kind: 'profile' },
+        ),
       })
     ).json();
     assert.equal(remembered.ok, true);
@@ -130,6 +137,20 @@ const guard = setTimeout(() => {
     assert.ok(chat);
     const js = (source) => chat.webContents.executeJavaScript(source, true);
     evidenceJs = js;
+    const waitCompleteSpeech = async (count) => {
+      if (process.env.DSH_PET_MEMORY_PROBE !== '1') return;
+      for (let i = 0; i < 250; i++) {
+        if (
+          await js(
+            `(()=>{const turn=__live.finalTexts[${count - 1}];if(!turn?.text)return false;const norm=text=>String(text||'').replace(/[^\\p{L}\\p{N}]/gu,'');const requests=__live.customRequests.filter(row=>row.turnId===turn.id);return requests.length>0&&requests.every(row=>row.readyAt&&!row.aborted&&!row.failed)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text);})()`,
+          )
+        )
+          return;
+        await wait(100);
+      }
+      throw new Error('Completed turn did not reach synthesis without missing or repeated text');
+    };
+
     for (let i = 0; i < 100; i++) {
       if (await js("!!document.querySelector('.pet-chat-live-button')")) break;
       await wait(100);
@@ -145,14 +166,14 @@ const guard = setTimeout(() => {
     assert.deepEqual(report.stylePicker.modes, ['natural', 'custom']);
     assert.equal(report.stylePicker.streaming, true);
     await js(`(async()=>{
-      window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[],utterances:[],warmRequests:[]};
+      window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[],utterances:[],warmRequests:[],finalTexts:[],wire:[]};
       document.addEventListener('pet-custom-voice-play',event=>{const row=__live.currentUtterance;const now=performance.now();__live.metrics.push({...event.detail,...(row?{fromSpeechEndMs:Math.round(now-row.endAt),recognitionMs:row.recognizedAt===undefined?undefined:Math.round(row.recognizedAt-row.endAt),modelToFirstTextMs:row.recognizedAt===undefined?undefined:Math.round(now-event.detail.fromTextMs-row.recognizedAt)}:{})});});
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
         const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
         const warm=String(url).endsWith('/voice/warm')?{active:JSON.parse(init?.body||'{}').active,at:performance.now()}:undefined;if(warm)__live.warmRequests.push(warm);
         const queuedAt=performance.now();const response=await originalFetch(url,init);
         if(warm)void response.clone().json().then(value=>Object.assign(warm,{status:response.status,prepared:value.prepared,reason:value.reason})).catch(()=>{});
-        if(voice){const row={voice,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
+        if(voice){const row={voice,turnId:__live.currentAssistantTurnId,text:JSON.parse(init.body).text,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
         return response;
       };
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
@@ -163,7 +184,7 @@ const guard = setTimeout(() => {
       window.__speakLiveSample=async()=>{const source=__ctx.createBufferSource();source.buffer=__sample;source.connect(__out);await __ctx.resume();const row={startAt:performance.now(),endAt:performance.now()+__sample.duration*1000};__live.utterances.push(row);source.start();};
       const RealPeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(RealPeer,{construct(target,args){
         const peer=new target(...args);__live.peers.push(peer);
-        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(value.type==='input_transcript.added'){__live.inputs++;__live.currentInput=__live.utterances[__live.utterances.length-1];if(__live.currentInput)__live.currentInput.recognizedAt??=performance.now();}if(value.type==='turn.created'&&value.turn.role==='assistant'){__live.assistantCreated++;__live.currentUtterance=__live.currentInput;}if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.assistantDoneAt.push(performance.now());}});return channel;};
+        const createChannel=peer.createDataChannel.bind(peer);peer.createDataChannel=(...args)=>{const channel=createChannel(...args);channel.addEventListener('message',event=>{const value=JSON.parse(event.data);if(['turn.created','turn.done','turn.delta','input_transcript.added','output_transcript.added'].includes(value.type))__live.wire.push(value);if(value.type==='input_transcript.added'){__live.inputs++;__live.currentInput=__live.utterances[__live.utterances.length-1];if(__live.currentInput)__live.currentInput.recognizedAt??=performance.now();}if(value.type==='turn.created'&&value.turn.role==='assistant'){__live.assistantCreated++;__live.currentAssistantTurnId=value.turn.id;__live.currentUtterance=__live.currentInput;}if(value.type==='turn.done'&&value.turn.role==='assistant'){__live.turns++;__live.finalTexts.push({id:value.turn.id,text:value.turn.transcript});__live.assistantDoneAt.push(performance.now());}});return channel;};
         peer.addEventListener('track',event=>{
           const stream=event.streams[0]||new MediaStream([event.track]);window.__recorder=new MediaRecorder(stream);
           __recorder.ondataavailable=event=>{if(event.data.size)__live.blobs.push(event.data);};__recorder.start(500);
@@ -212,6 +233,13 @@ const guard = setTimeout(() => {
         break;
       await wait(100);
     }
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+      for (let i = 0; i < 200; i++) {
+        if (await js('__live.turns>=2')) break;
+        await wait(100);
+      }
+    }
+    await waitCompleteSpeech(2);
     await wait(1500);
     report.live = await js(`(async()=>{
       if(window.__recorder?.state!=='inactive')await new Promise(done=>{__recorder.onstop=done;__recorder.stop();});
@@ -225,7 +253,7 @@ const guard = setTimeout(() => {
       }
       return {user:document.querySelector('.pet-chat-live-user')?.textContent,pet:document.querySelector('.pet-chat-live-pet')?.textContent,played:__live.played,recordedBytes,peak,inputs:__live.inputs,turns:__live.turns,assistantCreated:__live.assistantCreated,requests:__live.requests,draft:document.querySelector('textarea.pet-chat-input').value,microphoneDisabled:document.querySelector('.pet-chat-mic').disabled};
     })()`);
-    assert.match(report.live.user, /测试/);
+    assert.match(report.live.user, process.env.DSH_PET_MEMORY_PROBE === '1' ? /咖啡/ : /测试/);
     assert.ok(report.live.pet);
     assert.ok(report.live.played > 0);
     assert.ok(report.live.peak > 0.001);
@@ -276,6 +304,13 @@ const guard = setTimeout(() => {
       if (await js("!!__live.voiceSamples['bigfish-cute/sugarbud-v1']")) break;
       await wait(100);
     }
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+      for (let i = 0; i < 200; i++) {
+        if (await js('__live.turns>=3')) break;
+        await wait(100);
+      }
+    }
+    await waitCompleteSpeech(3);
     await js("document.querySelector('.pet-chat-live-button').click()");
     await wait(300);
     await js(
@@ -301,9 +336,33 @@ const guard = setTimeout(() => {
         break;
       await wait(100);
     }
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+      for (let i = 0; i < 200; i++) {
+        if (await js('__live.turns>=4')) break;
+        await wait(100);
+      }
+    }
+    await waitCompleteSpeech(4);
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') await wait(1200);
     report.custom = await js(
-      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,warmRequests:__live.warmRequests})',
+      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,wire:__live.wire,warmRequests:__live.warmRequests,finalTexts:__live.finalTexts})',
     );
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+      let matched = 0;
+      const normalized = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
+      for (const turn of report.custom.finalTexts.slice(1)) {
+        const requests = report.custom.requests.filter((row) => row.turnId === turn.id);
+        if (!requests.length || requests.some((row) => row.aborted || row.failed) || !turn.text) continue;
+        assert.equal(
+          normalized(requests.map((row) => row.text).join('')),
+          normalized(turn.text),
+          'Actual TTS input must match the completed assistant transcript without duplicated words',
+        );
+        matched++;
+      }
+      report.actualSpeechTextMatches = matched;
+      assert.ok(matched >= 3, 'Three complete custom-voice turns must match TTS input');
+    }
     assert.ok(
       report.custom.requests.every((request) => request.aborted || request.type.includes('audio')),
       '未取消的音色请求必须成功返回真实音频',
@@ -356,6 +415,13 @@ const guard = setTimeout(() => {
     const memoryFile = path.join(run, 'home/dsh-pet/memory.json');
     report.memoryUntouched = !fs.existsSync(memoryFile) || fs.readFileSync(memoryFile, 'utf8').trim() === '{}';
     assert.equal(report.memoryUntouched, true);
+    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+      const memory = await (await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', { headers })).json();
+      report.voiceMemoryCaptured = memory.facts.some(
+        (row) => row.source === 'codex-voice' && row.kind === 'preference' && row.text.includes('咖啡'),
+      );
+      assert.equal(report.voiceMemoryCaptured, true, 'Final spoken user preference must reach durable memory');
+    }
     if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
       await fetch(origin + '/standalone-ai/settings', {
         method: 'POST',
@@ -469,7 +535,7 @@ const guard = setTimeout(() => {
     report.error = error.stack;
     try {
       report.custom = await evidenceJs?.(
-        '({requests:window.__live?.customRequests,played:window.__live?.customPlayed,metrics:window.__live?.metrics,assistantDoneAt:window.__live?.assistantDoneAt})',
+        '({requests:window.__live?.customRequests,played:window.__live?.customPlayed,metrics:window.__live?.metrics,assistantDoneAt:window.__live?.assistantDoneAt,wire:window.__live?.wire,finalTexts:window.__live?.finalTexts})',
       );
       for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1']) {
         const b64 = await evidenceJs?.('window.__live?.voiceSamples[' + JSON.stringify('bigfish-cute/' + id) + ']');

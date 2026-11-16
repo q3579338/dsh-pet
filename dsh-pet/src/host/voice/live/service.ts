@@ -49,11 +49,14 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
     timer?: ReturnType<typeof setInterval>;
     off?: () => void;
     offClose?: () => void;
+    userText?: string;
+    memoryTimer?: ReturnType<typeof setTimeout>;
   };
   let active: Room | undefined;
   const release = (room: Room): void => {
     if (room.released) return;
     room.released = true;
+    clearTimeout(room.memoryTimer);
     clearInterval(room.timer);
     room.abort.abort();
     room.off?.();
@@ -160,8 +163,23 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
           if (params.threadId !== threadId || room.released) return;
           if (method === 'thread/realtime/transcript/done') {
             room.activity = Date.now();
-            if (params.role === 'user' && typeof params.text === 'string' && params.text.length <= 5000)
-              deps.memory?.remember(petId, params.text, 'codex-voice');
+            if (params.role === 'user' && typeof params.text === 'string' && params.text.length <= 5000) {
+              room.userText = ((room.userText ?? '') + params.text).slice(0, 5000);
+              clearTimeout(room.memoryTimer);
+              room.memoryTimer = setTimeout(() => {
+                if (!room.released && room.userText) deps.memory?.remember(petId, room.userText, 'codex-voice');
+              }, 300);
+              room.memoryTimer.unref?.();
+            }
+          }
+          if (
+            (method === 'thread/realtime/transcript/done' || method === 'thread/realtime/transcript/delta') &&
+            params.role === 'assistant' &&
+            room.userText
+          ) {
+            clearTimeout(room.memoryTimer);
+            deps.memory?.remember(petId, room.userText, 'codex-voice');
+            room.userText = '';
           }
           if (method === 'thread/realtime/error' || method === 'thread/realtime/closed') release(room);
         });

@@ -9,6 +9,38 @@ export function assistantTranscriptDelta(event: Record<string, unknown>, assista
 }
 
 type TranscriptUpdate = { begin?: boolean; delta?: string; full?: string; done?: boolean };
+/** 一次用户发言可能拆成多个识别条目；同编号修订替换，独立片段按顺序合并。 */
+export function createUserTranscript() {
+  const parts = new Map<string, string>();
+  let sequence = 0,
+    pending = false;
+  return {
+    begin() {
+      pending = true;
+    },
+    complete(value: unknown): string {
+      const full = transcriptText(value);
+      if (full) {
+        parts.clear();
+        parts.set('complete', full);
+        pending = true;
+      }
+      return [...parts.values()].join('').slice(0, 6000);
+    },
+    append(item: Record<string, unknown>): string {
+      const value = transcriptText(item.text);
+      if (!value) return [...parts.values()].join('').slice(0, 6000);
+      if (pending && /[\p{L}\p{N}]/u.test(value)) {
+        parts.clear();
+        sequence = 0;
+        pending = false;
+      }
+      const id = typeof item.id === 'string' ? item.id : 'part-' + sequence++;
+      if (parts.size < 512 || parts.has(id)) parts.set(id, value);
+      return [...parts.values()].join('').slice(0, 6000);
+    },
+  };
+}
 const record = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 function transcriptText(value: unknown): string {
@@ -44,14 +76,14 @@ export function createAssistantTranscript() {
         turns.add(turn.id);
         if (turns.size > 32) turns.delete(turns.values().next().value!);
         id = turn.id;
-        emitted = '';
-        deltas = '';
+        emitted = transcriptText(turn.transcript);
+        deltas = emitted;
         outputs = '';
         unscoped = '';
         done = false;
         items.clear();
         events.clear();
-        return { begin: true };
+        return emitted ? { begin: true, delta: emitted, full: emitted } : { begin: true };
       }
       if (!id || done) return {};
       if (typeof event.event_id === 'string') {

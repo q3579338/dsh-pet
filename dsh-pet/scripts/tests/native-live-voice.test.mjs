@@ -71,7 +71,7 @@ test(
       assert.equal(report.hostReleased, true);
       assert.equal(report.memoryUntouched, true);
       assert.equal(report.cancelled, true);
-      assert.match(report.dictation, /测试/);
+      assert.match(report.dictation, process.env.DSH_PET_MEMORY_PROBE === '1' ? /我喜欢.*咖啡/ : /测试/);
       assert.equal(report.savedClearedDirty, true);
       assert.equal(report.savedClosed, true);
       assert.equal(report.cancelCloseKeptWindow, true);

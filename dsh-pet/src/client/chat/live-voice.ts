@@ -6,7 +6,7 @@ import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
 import { createCustomSpeechOutput, type CustomSpeechQueue } from './custom-speech.ts';
 import { watchMicrophoneSpeech } from './microphone-activity.ts';
-import { createAssistantTranscript } from './live-transcript.ts';
+import { createAssistantTranscript, createUserTranscript } from './live-transcript.ts';
 import { createWorkBuddyVoiceControl } from './workbuddy-voice.ts';
 import type { LiveControlOptions } from './live-voice-types.ts';
 
@@ -35,17 +35,6 @@ function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-/** 单次字幕文本上限；任意音频和其他事件字段不送进页面。 */
-function text(value: unknown): string {
-  if (typeof value === 'string') return value.slice(0, 6000);
-  if (Array.isArray(value))
-    return value
-      .map((item) => text(record(item).text))
-      .join('')
-      .slice(0, 6000);
-  return '';
-}
-
 /** 连接控制器的最小宿主，不依赖 React，方便验证真实媒体和取消路径。 */
 function createCodexLiveVoiceControl(options: {
   petId: string;
@@ -72,6 +61,7 @@ function createCodexLiveVoiceControl(options: {
     reportedPlayback?: boolean;
     speechFailed?: boolean;
     transcript: ReturnType<typeof createAssistantTranscript>;
+    userTranscript: ReturnType<typeof createUserTranscript>;
   };
   let call: Call | undefined;
   let state: LiveData = { ...EMPTY };
@@ -123,6 +113,7 @@ function createCodexLiveVoiceControl(options: {
       peer: new RTCPeerConnection(),
       audio: document.createElement('audio'),
       transcript: createAssistantTranscript(),
+      userTranscript: createUserTranscript(),
     };
     call = current;
     setLiveVoiceActive(true);
@@ -196,6 +187,7 @@ function createCodexLiveVoiceControl(options: {
         current.speech.begin();
         current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
           if (!relevant()) return;
+          current.userTranscript.begin();
           current.transcript.interrupt();
           if (current.speech?.busy()) current.speech.interrupt();
           current.speech?.prime?.();
@@ -209,7 +201,11 @@ function createCodexLiveVoiceControl(options: {
         try {
           const value = record(JSON.parse(event.data));
           const item = record(value.item);
-          if (value.type === 'input_transcript.added') paint({ user: text(item.text) });
+          const turn = record(value.turn);
+          if (value.type === 'input_audio_buffer.speech_started') current.userTranscript.begin();
+          if (value.type === 'input_transcript.added') paint({ user: current.userTranscript.append(item) });
+          if (value.type === 'turn.done' && turn.role === 'user')
+            paint({ user: current.userTranscript.complete(turn.transcript) });
           const transcript = current.transcript.accept(value);
           if (transcript.begin) {
             current.speechFailed = false;

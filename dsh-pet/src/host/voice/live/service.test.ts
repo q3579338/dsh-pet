@@ -94,11 +94,20 @@ test('原生通话载入长期信息，仅最终用户字幕可写入；管理�
     assert.match(usedPrompt, /星宝/u);
     f.notify('thread/realtime/transcript/done', { role: 'assistant', text: '模型虚构的事实' });
     f.notify('thread/realtime/transcript/done', { role: 'user', text: '不该记录', threadId: 'other' });
-    f.notify('thread/realtime/transcript/done', { role: 'user', text: '我喜欢咖啡' });
-    assert.deepEqual(remembered, ['我喜欢咖啡']);
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '我喜欢' });
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '喝咖啡' });
+    f.notify('thread/realtime/transcript/delta', { role: 'assistant', text: '收到' });
+    assert.deepEqual(remembered, ['我喜欢喝咖啡']);
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '这段应随停止一起丢弃' });
     f.service.stopAll();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.deepEqual(remembered, ['我喜欢喝咖啡']);
     assert.ok(f.closed() > 0);
     assert.equal((await f.service.start('main', 'v=0\r\ntest')).ok, true);
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '我喜欢' });
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '茶' });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.deepEqual(remembered, ['我喜欢喝咖啡', '我喜欢茶']);
   } finally {
     f.cleanup();
   }

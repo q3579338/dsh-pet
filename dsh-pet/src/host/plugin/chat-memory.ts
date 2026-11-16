@@ -125,11 +125,11 @@ export function createChatMemory(deps: ChatMemoryInput) {
         } catch (error) {
           if (
             process.platform !== 'win32' ||
-            attempt >= 6 ||
+            attempt >= 16 ||
             !['EPERM', 'EACCES', 'EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '')
           )
             throw error;
-          await delay(20 * (attempt + 1));
+          await delay(Math.min(120, 10 * 2 ** attempt));
         }
       }
     } catch (error) {
