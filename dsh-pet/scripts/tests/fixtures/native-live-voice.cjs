@@ -71,7 +71,12 @@ const guard = setTimeout(() => {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        text: process.env.DSH_PET_MEMORY_PROBE === '1' ? '我喜欢喝咖啡。' : '测试。',
+        text:
+          process.env.DSH_PET_ACTION_PROBE === '1'
+            ? '你吃个西瓜给我看。'
+            : process.env.DSH_PET_MEMORY_PROBE === '1'
+              ? '我喜欢喝咖啡。'
+              : '测试。',
         voice: 'windows/zh-CN',
       }),
     });
@@ -85,7 +90,14 @@ const guard = setTimeout(() => {
       })
     ).json();
     assert.equal(dictation.ok, true, dictation.message);
-    assert.match(dictation.text, process.env.DSH_PET_MEMORY_PROBE === '1' ? /我喜欢.*咖啡/ : /测试/);
+    assert.match(
+      dictation.text,
+      process.env.DSH_PET_ACTION_PROBE === '1'
+        ? /西瓜/
+        : process.env.DSH_PET_MEMORY_PROBE === '1'
+          ? /我喜欢.*咖啡/
+          : /测试/,
+    );
     report.dictation = dictation.text;
     if (process.env.DSH_PET_NATIVE_WORKBUDDY === '1') {
       const selected = await (
@@ -137,12 +149,26 @@ const guard = setTimeout(() => {
     assert.ok(chat);
     const js = (source) => chat.webContents.executeJavaScript(source, true);
     evidenceJs = js;
-    const waitCompleteSpeech = async (count) => {
+    const awaitStartup = async () => {
+      for (let i = 0; i < 150; i++) {
+        await wait(100);
+        if (
+          i >= 50 &&
+          (await js(
+            '!__live.currentAssistantTurnId||__live.finalTexts.some(turn=>turn.id===__live.currentAssistantTurnId)',
+          ))
+        )
+          break;
+      }
+    };
+
+    const waitCompleteSpeech = async () => {
       if (process.env.DSH_PET_MEMORY_PROBE !== '1') return;
+      const target = await js('__live.currentAssistantTurnId');
       for (let i = 0; i < 250; i++) {
         if (
           await js(
-            `(()=>{const turn=__live.finalTexts[${count - 1}];if(!turn?.text)return false;const norm=text=>String(text||'').replace(/[^\\p{L}\\p{N}]/gu,'');const requests=__live.customRequests.filter(row=>row.turnId===turn.id);return requests.length>0&&requests.every(row=>row.readyAt&&!row.aborted&&!row.failed)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text);})()`,
+            `(()=>{const turn=__live.finalTexts.find(turn=>turn.id===${JSON.stringify(target)});if(!turn?.text)return false;const norm=text=>String(text||'').replace(/[^\\p{L}\\p{N}]/gu,'');const requests=__live.customRequests.filter(row=>row.turnId===turn.id);return requests.length>0&&requests.every(row=>row.readyAt&&!row.aborted&&!row.failed)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text);})()`,
           )
         )
           return;
@@ -179,7 +205,7 @@ const guard = setTimeout(() => {
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
       window.__ctx=new AudioContext();const decoded=await __ctx.decodeAudioData(buffer.buffer);const pcm=decoded.getChannelData(0);let first=0,last=pcm.length-1;while(first<last&&Math.abs(pcm[first])<0.005)first++;while(last>first&&Math.abs(pcm[last])<0.005)last--;first=Math.max(0,first-Math.round(decoded.sampleRate*0.02));last=Math.min(pcm.length-1,last+Math.round(decoded.sampleRate*0.02));window.__sample=__ctx.createBuffer(1,last-first+1,decoded.sampleRate);__sample.copyToChannel(pcm.slice(first,last+1),0);
       navigator.mediaDevices.getUserMedia=async()=>{
-        __live.requests++;__live.currentInput=undefined;__live.currentUtterance=undefined;window.__out=__ctx.createMediaStreamDestination();__live.tracks.push(...__out.stream.getTracks());return __out.stream;
+        __live.requests++;__live.currentAssistantTurnId=undefined;__live.currentInput=undefined;__live.currentUtterance=undefined;window.__out=__ctx.createMediaStreamDestination();__live.tracks.push(...__out.stream.getTracks());return __out.stream;
       };
       window.__speakLiveSample=async()=>{const source=__ctx.createBufferSource();source.buffer=__sample;source.connect(__out);await __ctx.resume();const row={startAt:performance.now(),endAt:performance.now()+__sample.duration*1000};__live.utterances.push(row);source.start();};
       const RealPeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(RealPeer,{construct(target,args){
@@ -204,6 +230,7 @@ const guard = setTimeout(() => {
     }
     report.connected = await js("__live.peers[0]?.connectionState==='connected'");
     assert.equal(report.connected, true);
+    await awaitStartup();
     await js('__speakLiveSample()');
     for (let i = 0; i < 180; i++) {
       if (
@@ -219,7 +246,14 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     assert.equal(await js("document.querySelector('audio[data-pet-native-voice]').volume"), 0);
-    await js('window.__oldCustom=__live.customAudios.slice()');
+    if (process.env.DSH_PET_ACTION_PROBE === '1')
+      report.presentation = await require('./voice-presentation.cjs')({
+        windows: () => RealWindow.getAllWindows(),
+        origin,
+        headers,
+        run,
+      });
+    await js('window.__oldCustom=__live.customAudios.slice();__live.interruptedTurnId=__live.currentAssistantTurnId');
     await js('__speakLiveSample()');
     await wait(350);
     report.bargeInStoppedOld = await js('__oldCustom.every(audio=>audio.paused)');
@@ -239,7 +273,7 @@ const guard = setTimeout(() => {
         await wait(100);
       }
     }
-    await waitCompleteSpeech(2);
+    await waitCompleteSpeech();
     await wait(1500);
     report.live = await js(`(async()=>{
       if(window.__recorder?.state!=='inactive')await new Promise(done=>{__recorder.onstop=done;__recorder.stop();});
@@ -253,7 +287,10 @@ const guard = setTimeout(() => {
       }
       return {user:document.querySelector('.pet-chat-live-user')?.textContent,pet:document.querySelector('.pet-chat-live-pet')?.textContent,played:__live.played,recordedBytes,peak,inputs:__live.inputs,turns:__live.turns,assistantCreated:__live.assistantCreated,requests:__live.requests,draft:document.querySelector('textarea.pet-chat-input').value,microphoneDisabled:document.querySelector('.pet-chat-mic').disabled};
     })()`);
-    assert.match(report.live.user, process.env.DSH_PET_MEMORY_PROBE === '1' ? /咖啡/ : /测试/);
+    assert.match(
+      report.live.user,
+      process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : process.env.DSH_PET_MEMORY_PROBE === '1' ? /咖啡/ : /测试/,
+    );
     assert.ok(report.live.pet);
     assert.ok(report.live.played > 0);
     assert.ok(report.live.peak > 0.001);
@@ -289,6 +326,7 @@ const guard = setTimeout(() => {
       if (await js("__live.peers[1]?.connectionState==='connected'")) break;
       await wait(100);
     }
+    await awaitStartup();
     await js('__speakLiveSample()');
     for (let i = 0; i < 300; i++) {
       if (
@@ -310,7 +348,7 @@ const guard = setTimeout(() => {
         await wait(100);
       }
     }
-    await waitCompleteSpeech(3);
+    await waitCompleteSpeech();
     await js("document.querySelector('.pet-chat-live-button').click()");
     await wait(300);
     await js(
@@ -322,6 +360,7 @@ const guard = setTimeout(() => {
       if (await js("__live.peers[2]?.connectionState==='connected'")) break;
       await wait(100);
     }
+    await awaitStartup();
     await js('__speakLiveSample()');
     for (let i = 0; i < 300; i++) {
       if (
@@ -342,15 +381,16 @@ const guard = setTimeout(() => {
         await wait(100);
       }
     }
-    await waitCompleteSpeech(4);
+    await waitCompleteSpeech();
     if (process.env.DSH_PET_MEMORY_PROBE === '1') await wait(1200);
     report.custom = await js(
-      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,wire:__live.wire,warmRequests:__live.warmRequests,finalTexts:__live.finalTexts})',
+      '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,wire:__live.wire,warmRequests:__live.warmRequests,interruptedTurnId:__live.interruptedTurnId,finalTexts:__live.finalTexts})',
     );
     if (process.env.DSH_PET_MEMORY_PROBE === '1') {
       let matched = 0;
       const normalized = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
-      for (const turn of report.custom.finalTexts.slice(1)) {
+      for (const turn of report.custom.finalTexts) {
+        if (turn.id === report.custom.interruptedTurnId) continue;
         const requests = report.custom.requests.filter((row) => row.turnId === turn.id);
         if (!requests.length || requests.some((row) => row.aborted || row.failed) || !turn.text) continue;
         assert.equal(
@@ -390,6 +430,7 @@ const guard = setTimeout(() => {
       if (await js("__live.peers[3]?.connectionState==='connected'")) break;
       await wait(100);
     }
+    await awaitStartup();
     await js('__speakLiveSample()');
     for (let i = 0; i < 180; i++) {
       if (await js("!!document.querySelector('.pet-chat-live-pet')?.textContent")) break;

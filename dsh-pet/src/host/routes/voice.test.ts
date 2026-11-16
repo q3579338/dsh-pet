@@ -36,6 +36,30 @@ function input(rest: string, method: string, body?: string) {
   return { url: new URL(`http://127.0.0.1:1/dsh-pet-7340/${rest}`), rest, method, body };
 }
 
+test('实时画面路由只接受POST与会话编号，字幕载荷交由通话所有者核验', async () => {
+  const seen: unknown[] = [];
+  const deps = makeDeps(async () => ({}));
+  Object.assign(deps, {
+    liveVoice: {
+      present: (id: string, frame: unknown) => {
+        seen.push({ id, frame });
+        return id === 'current';
+      },
+    },
+  });
+  const frame = { sequence: 1, turnId: 'u1', type: 'user', text: '你吃西瓜' };
+  const result = await handleVoiceRoutes(
+    deps,
+    input('voice/live/present', 'POST', JSON.stringify({ sessionId: 'current', frame })),
+  );
+  assert.equal(result?.kind === 'json' && (result.obj as { ok: boolean }).ok, true);
+  assert.deepEqual(seen, [{ id: 'current', frame }]);
+  const bad = await handleVoiceRoutes(deps, input('voice/live/present', 'POST', '{}'));
+  assert.equal(bad?.kind === 'json' && (bad.obj as { reason: string }).reason, 'bad-request');
+  const wrong = await handleVoiceRoutes(deps, input('voice/live/present', 'GET'));
+  assert.equal(wrong?.kind === 'json' ? wrong.status : 0, 405);
+});
+
 test('GET /voice/hear-providers：返回识别实现目录', async () => {
   const result = await handleVoiceRoutes(
     makeDeps(async () => ({ ok: true, file: '/x.mp3', contentType: 'audio/mpeg' })),

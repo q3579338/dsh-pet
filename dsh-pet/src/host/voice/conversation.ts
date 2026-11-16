@@ -7,9 +7,11 @@ import type { AiRequest } from '../../standalone/ai-transport.ts';
 import type { WorkBuddyEvent } from '../../standalone/workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
 import type { LongTermMemory } from '../long-term-memory/service.ts';
+import type { VoicePresentation } from './presentation.ts';
 
 /** 宿主仅提供当前模型、角色与实际调用，测试不访问真实账号。 */
 export interface ConversationDependencies {
+  presentation?(petId: string): VoicePresentation;
   memory?: Pick<LongTermMemory, 'context' | 'remember'>;
   selection(): { protocol: string; model: string } | undefined;
   prompt(petId: string): string | undefined;
@@ -61,6 +63,8 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     listening: boolean;
     touch: number;
     timer?: ReturnType<typeof setInterval>;
+    presentation?: VoicePresentation;
+    presentationSequence: number;
   };
   let active: Room | undefined;
   let disposed = false;
@@ -75,6 +79,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   const release = (room: Room): void => {
     if (room.abort.signal.aborted) return;
     room.abort.abort();
+    room.presentation?.dispose();
     room.reply?.abort();
     clearInterval(room.timer);
     for (const asr of room.asrs) asr.dispose();
@@ -134,6 +139,12 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     room.epoch++;
     room.reply?.abort();
     room.reply = undefined;
+    room.presentation?.accept({
+      sequence: ++room.presentationSequence,
+      type: 'interrupt',
+      turnId: String(room.epoch),
+      text: '',
+    });
     emit(room, { type: 'interrupted' });
   };
   const complete = async (room: Room, input: Input): Promise<void> => {
@@ -141,10 +152,16 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       const user = await input.asr.finish();
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       if (!user || !/[\p{L}\p{N}]/u.test(user)) return;
-      emit(room, { type: 'user', text: user });
       const selection = deps.selection();
       if (selection?.protocol !== 'workbuddy' || selection.model !== room.model)
         throw new WorkBuddyFailure('模型设置已变化，请结束语音后重新开始。');
+      emit(room, { type: 'user', text: user });
+      room.presentation?.accept({
+        sequence: ++room.presentationSequence,
+        type: 'user',
+        turnId: String(input.id),
+        text: user,
+      });
       deps.memory?.remember(room.petId, user, 'workbuddy-voice');
       const abort = new AbortController();
       room.reply = abort;
@@ -164,6 +181,12 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
           answer += event.text;
           if (answer.length > 4000) throw new WorkBuddyFailure('回复太长，请换个简短问题。');
           emit(room, { type: 'text', text: event.text });
+          room.presentation?.accept({
+            sequence: ++room.presentationSequence,
+            type: 'assistant',
+            turnId: String(input.id),
+            text: answer,
+          });
         }
       }
       if (!answer.trim()) throw new WorkBuddyFailure('DeepSeek 暂时没有回复，请继续说话重试。');
@@ -172,10 +195,23 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       while (room.history.length > 12 || room.history.reduce((n, message) => n + message.content.length, 0) > 8000)
         room.history.splice(0, 2);
       room.reply = undefined;
+      room.presentation?.accept({
+        sequence: ++room.presentationSequence,
+        type: 'assistant',
+        turnId: String(input.id),
+        text: answer,
+        complete: true,
+      });
       emit(room, { type: 'done' });
     } catch (error) {
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       room.reply = undefined;
+      room.presentation?.accept({
+        sequence: ++room.presentationSequence,
+        type: 'interrupt',
+        turnId: String(input.id),
+        text: '',
+      });
       emit(room, {
         type: 'error',
         fatal: false,
@@ -203,6 +239,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       if (deps.ready?.() === false) return { ok: false, message: '请先启用并保存 WorkBuddy 模型连接，再开始语音。' };
       if (!prompt || !style?.synthesisVoice) return { ok: false, message: '请选择桌宠和自定义音色。' };
       if (active || deps.busy?.()) return { ok: false, message: '已有即时语音正在连接或聊天，请先结束。' };
+      const presentation = deps.presentation?.(petId);
       const room: Room = {
         id: randomUUID(),
         petId,
@@ -210,7 +247,10 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         prompt:
           prompt +
           '\n你正在进行实时中文语音闲聊。直接回答刚听到的话，通常一两句、60字以内；第一小句先回答重点。不要输出JSON、Markdown、思考过程、工具调用或舞台动作。不要固定开场白或先说“让我想想”。\n' +
-          style.instructions,
+          style.instructions +
+          (presentation?.instructions() ?? ''),
+        presentation,
+        presentationSequence: 0,
         abort: new AbortController(),
         epoch: 0,
         lastUtterance: 0,

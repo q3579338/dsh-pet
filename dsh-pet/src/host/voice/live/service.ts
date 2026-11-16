@@ -8,6 +8,7 @@ import { readCodexSpeechIdentity } from '../codex/auth.ts';
 import { createCodexLiveCall, LiveVoiceError } from './http.ts';
 import { DEFAULT_LIVE_VOICE_STYLE, liveVoiceStyle } from '../../../shared/live-voice-style.ts';
 import type { LongTermMemory } from '../../long-term-memory/service.ts';
+import type { VoicePresentation } from '../presentation.ts';
 
 /** 页面拿不到账号令牌，只拿到这次协商必需的 SDP 和本地会话编号。 */
 export type LiveStartResult = { ok: true; sessionId: string; answerSdp: string } | { ok: false; message: string };
@@ -16,6 +17,7 @@ export interface LiveVoiceService {
   stopAll(): void;
   start(petId: string, sdp: string, signal?: AbortSignal, styleId?: string): Promise<LiveStartResult>;
   touch(sessionId: string): boolean;
+  present(sessionId: string, frame: unknown): boolean;
   stop(sessionId: string): Promise<void>;
   dispose(): void;
 }
@@ -24,6 +26,7 @@ export interface LiveVoiceService {
 type LiveClient = Pick<CodexClient, 'initialize' | 'request' | 'onNotification' | 'onClose' | 'close'>;
 /** 提示词与普通对话模型按当前宠物读取，网络能力可由隔离测试替换。 */
 interface LiveDependencies {
+  presentation?(petId: string): VoicePresentation;
   memory?: Pick<LongTermMemory, 'context' | 'remember'>;
   home: string;
   settings(petId: string): { prompt: string; model: string } | undefined;
@@ -51,11 +54,13 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
     offClose?: () => void;
     userText?: string;
     memoryTimer?: ReturnType<typeof setTimeout>;
+    presentation?: VoicePresentation;
   };
   let active: Room | undefined;
   const release = (room: Room): void => {
     if (room.released) return;
     room.released = true;
+    room.presentation?.dispose();
     clearTimeout(room.memoryTimer);
     clearInterval(room.timer);
     room.abort.abort();
@@ -113,6 +118,7 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
         released: false,
         touch: Date.now(),
         activity: Date.now(),
+        presentation: deps.presentation?.(petId),
       };
       active = room;
       deps.activeChanged(true);
@@ -130,6 +136,12 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
         ]);
         const catalog = codexRecord(rawModels).data;
         const model = selectChatModel(parseChatModels(Array.isArray(catalog) ? catalog : []), settings.model);
+        const instructions =
+          settings.prompt +
+          '\n【声音与节奏】' +
+          style.instructions +
+          '\n只进行简短自然的中文语音闲聊，不操作文件，不使用工具，不发起任务委托。不解释声音设定，直接用所选声音说话。' +
+          (room.presentation?.instructions() ?? '');
         const started = codexRecord(
           await room.client.request('thread/start', {
             cwd,
@@ -149,11 +161,7 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
           sdp,
           threadId,
           sessionId: room.id,
-          prompt:
-            settings.prompt +
-            '\n【声音与节奏】' +
-            style.instructions +
-            '\n只进行简短自然的中文语音闲聊，不操作文件，不使用工具，不发起任务委托。不解释声音设定，直接用所选声音说话。',
+          prompt: instructions,
           model: model.id,
           effort: model.effort,
           identity: auth,
@@ -219,6 +227,17 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
       if (!active || active.id !== id) return false;
       active.touch = Date.now();
       return true;
+    },
+    present(id, frame) {
+      if (
+        !active ||
+        active.id !== id ||
+        active.released ||
+        active.abort.signal.aborted ||
+        (deps.source && deps.source() !== 'codex')
+      )
+        return false;
+      return active.presentation?.accept(frame) ?? false;
     },
     stop,
     dispose() {

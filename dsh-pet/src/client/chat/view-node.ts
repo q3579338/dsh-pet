@@ -396,8 +396,9 @@ export function composerNode(
                     children: liveVoiceStyle(live.styleId)?.synthesisVoice
                       ? (live.source === 'workbuddy'
                           ? 'WorkBuddy 自己识别语音并回答；'
-                          : 'Codex/OpenAI 识别语音并回答；') + '所选音色独立朗读，字幕先出现，本通不写入普通聊天记忆。'
-                      : '麦克风正在使用，语音发送至 Codex/OpenAI。本次直接播放 Codex 原声，字幕不写入普通聊天记忆。',
+                          : 'Codex/OpenAI 识别语音并回答；') +
+                        '回复同步到头顶气泡，所选音色朗读；可说“吃个西瓜给我看”。本通不写入普通聊天记忆。'
+                      : '语音发送至 Codex/OpenAI，直接播放 Codex 原声；回复同步到头顶气泡，可说“吃个西瓜给我看”。字幕不写入普通聊天记忆。',
                   })
                 : null,
               live.user ? h('div', { className: 'pet-chat-live-user', children: '你：' + live.user }) : null,

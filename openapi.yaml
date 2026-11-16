@@ -2692,6 +2692,34 @@ paths:
                   answerSdp: { type: string }
                   message: { type: string }
 
+  /dsh-pet-7340/voice/live/present:
+    post:
+      tags: [Voice]
+      operationId: presentLiveVoice
+      summary: 同步当前Codex语音字幕和明确的桌宠动作请求
+      description: 仅当前有效语音会话受理；序号递增，重复或迟到帧拒绝。动作只从当前角色已开启的动画名单匹配。气泡不触发第二份朗读，不改写普通聊天历史。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sessionId, frame]
+              properties:
+                sessionId: { type: string }
+                frame:
+                  type: object
+                  required: [sequence, turnId, type, text]
+                  properties:
+                    sequence: { type: integer, minimum: 1 }
+                    turnId: { type: string, minLength: 1, maxLength: 200 }
+                    type: { type: string, enum: [user, assistant, interrupt] }
+                    text: { type: string, maxLength: 6000 }
+                    complete: { type: boolean }
+      responses:
+        "200":
+          description: ok:true表示已受理；会话结束、来源已切换或无效帧返回ok:false
+
   /dsh-pet-7340/voice/live/touch:
     post:
       tags: [Voice]

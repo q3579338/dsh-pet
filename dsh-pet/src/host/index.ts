@@ -35,6 +35,8 @@ import { createLiveVoiceService } from './voice/live/service.ts';
 import { createWorkBuddyDictation } from '../standalone/workbuddy/dictation.ts';
 import { ensureWorkBuddySpeech } from './voice/workbuddy-provider.ts';
 import { createVoiceConversation } from './voice/conversation.ts';
+import { createVoicePresentation } from './voice/presentation.ts';
+import { chatActionNames } from './chat-action.ts';
 import type { StandaloneModelService } from '../standalone/llm-facade.ts';
 import { credentialRef } from '@deepseek-ai/dsh-credentials';
 import { createVoiceService } from './voice/speak.ts';
@@ -174,9 +176,23 @@ export function apply(ctx: any): void {
 
   let nativeVoiceActive = false,
     workbuddyVoiceActive = false;
+  const voicePresentation = (petId: string) =>
+    createVoicePresentation({
+      petId,
+      state,
+      playback,
+      settings: () => {
+        const found = findPetInstance(readAllConfig(configPaths), petId);
+        return {
+          available: !!found && found.pet.display !== 'none' && !lock.current(petId) && !sleep.sleeping(petId),
+          actions: found?.conf.chatAnimationEnabled === true ? chatActionNames(found.conf.animations) : [],
+        };
+      },
+    });
   const liveVoice =
     process.env.DSH_PET_CODEX === '1'
       ? createLiveVoiceService({
+          presentation: voicePresentation,
           home: userRoot,
           memory: longTermMemory,
           settings: (petId) => {
@@ -212,6 +228,7 @@ export function apply(ctx: any): void {
   const voiceConversation =
     process.env.DSH_PET_CODEX === '1' && voiceAi?.voiceStream
       ? createVoiceConversation({
+          presentation: voicePresentation,
           memory: longTermMemory,
           selection: () => voiceAi.voiceSelection?.(),
           ready: () => voiceAi.isReady(),

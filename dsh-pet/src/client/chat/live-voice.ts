@@ -9,6 +9,7 @@ import { watchMicrophoneSpeech } from './microphone-activity.ts';
 import { createAssistantTranscript, createUserTranscript } from './live-transcript.ts';
 import { createWorkBuddyVoiceControl } from './workbuddy-voice.ts';
 import type { LiveControlOptions } from './live-voice-types.ts';
+import { createVoicePresentationSender } from './voice-presentation.ts';
 
 /** 对话区只显示本次最近一轮字幕，不写入普通聊天存档。 */
 export interface LiveVoiceView {
@@ -62,6 +63,8 @@ function createCodexLiveVoiceControl(options: {
     speechFailed?: boolean;
     transcript: ReturnType<typeof createAssistantTranscript>;
     userTranscript: ReturnType<typeof createUserTranscript>;
+    presentation?: ReturnType<typeof createVoicePresentationSender>;
+    assistantId?: string;
   };
   let call: Call | undefined;
   let state: LiveData = { ...EMPTY };
@@ -87,6 +90,7 @@ function createCodexLiveVoiceControl(options: {
       clearTimeout(old.disconnect);
       old.abort.abort();
       old.speech?.dispose();
+      old.presentation?.dispose();
       old.stopMicWatch?.();
       old.stream?.getTracks().forEach((track) => track.stop());
       old.peer.close();
@@ -122,6 +126,10 @@ function createCodexLiveVoiceControl(options: {
       if (call === current) stop('即时语音连接超时，请重试。');
     }, 35000);
     const relevant = (): boolean => call === current && !current.abort.signal.aborted;
+    current.presentation = createVoicePresentationSender(
+      (frame) => post('present', { sessionId: current.sessionId, frame }, current.abort.signal).then((r) => r.json()),
+      () => relevant() && !!current.sessionId,
+    );
     try {
       const config = fetch(ROUTE_SEGMENT + '/config', { signal: current.abort.signal })
         .then((response) => response.json())
@@ -188,6 +196,7 @@ function createCodexLiveVoiceControl(options: {
         current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
           if (!relevant()) return;
           current.userTranscript.begin();
+          current.presentation?.emit({ type: 'interrupt', turnId: 'microphone', text: '' });
           current.transcript.interrupt();
           if (current.speech?.busy()) current.speech.interrupt();
           current.speech?.prime?.();
@@ -204,10 +213,14 @@ function createCodexLiveVoiceControl(options: {
           const turn = record(value.turn);
           if (value.type === 'input_audio_buffer.speech_started') current.userTranscript.begin();
           if (value.type === 'input_transcript.added') paint({ user: current.userTranscript.append(item) });
-          if (value.type === 'turn.done' && turn.role === 'user')
-            paint({ user: current.userTranscript.complete(turn.transcript) });
+          if (value.type === 'turn.done' && turn.role === 'user') {
+            const user = current.userTranscript.complete(turn.transcript);
+            paint({ user });
+            if (typeof turn.id === 'string') current.presentation?.emit({ type: 'user', turnId: turn.id, text: user });
+          }
           const transcript = current.transcript.accept(value);
           if (transcript.begin) {
+            current.assistantId = typeof turn.id === 'string' ? turn.id : undefined;
             current.speechFailed = false;
             paint({ pet: '' });
             current.firstOutputAt = undefined;
@@ -219,11 +232,24 @@ function createCodexLiveVoiceControl(options: {
             if (!current.firstOutputAt) current.firstOutputAt = Date.now();
             paint({ pet: transcript.full ?? (state.pet + delta).slice(-6000) });
             current.speech?.append(delta);
+            if (current.assistantId)
+              current.presentation?.emit({
+                type: 'assistant',
+                turnId: current.assistantId,
+                text: transcript.full ?? state.pet,
+              });
           }
           if (transcript.done) {
             const full = transcript.full;
             if (full) paint({ pet: full });
             current.speech?.finish(full);
+            if (full && current.assistantId)
+              current.presentation?.emit({
+                type: 'assistant',
+                turnId: current.assistantId,
+                text: full,
+                complete: true,
+              });
           }
           // 自动打断由本机持续开口检测决定，服务端单帧噪声事件不直接截断朗读。
           if (value.type === 'input_audio_buffer.speech_started') current.speech?.prime?.();
@@ -321,6 +347,7 @@ function createCodexLiveVoiceControl(options: {
       else void start();
     },
     interrupt() {
+      call?.presentation?.emit({ type: 'interrupt', turnId: 'manual', text: '' });
       call?.transcript.interrupt();
       call?.speech?.interrupt();
       if (call) paint({ message: '已停止这一句，麦克风仍在接收，可以继续说话。' });

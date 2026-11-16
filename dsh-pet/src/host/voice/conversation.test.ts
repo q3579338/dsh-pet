@@ -6,7 +6,10 @@ import type { ConversationEvent } from '../../shared/voice-conversation.ts';
 import type { AiRequest } from '../../standalone/ai-transport.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
 
-async function fixture(memory?: Parameters<typeof createVoiceConversation>[0]['memory']) {
+async function fixture(
+  memory?: Parameters<typeof createVoiceConversation>[0]['memory'],
+  presentation?: Parameters<typeof createVoiceConversation>[0]['presentation'],
+) {
   const asrs: Array<StreamingDictation & { finishText(text: string): void; stopped: boolean; chunks: number }> = [];
   const requests: AiRequest[] = [],
     states: boolean[] = [];
@@ -14,6 +17,7 @@ async function fixture(memory?: Parameters<typeof createVoiceConversation>[0]['m
   let ready = true;
   const service = createVoiceConversation({
     memory,
+    presentation,
     selection: () => selected,
     ready: () => ready,
     prompt: (id) => (id === 'fish' ? '你是大肥鱼。' : undefined),
@@ -103,6 +107,47 @@ test('WorkBuddy 连续语音召回长期事实，只提交实际用户转写，�
     assert.match(f.requests[0].system, /星宝/u);
     f.service.stopAll();
     assert.equal((await f.service.start('fish', 'dango')).ok, true);
+  } finally {
+    f.service.dispose();
+  }
+});
+
+test('WorkBuddy把完整识别、累计回复和取消交给同一桌宠画面，不额外请求模型', async () => {
+  const frames: unknown[] = [];
+  let disposed = 0;
+  const f = await fixture(undefined, () => ({
+    instructions: () => '可表演吃西瓜',
+    accept: (frame: unknown) => {
+      frames.push(frame);
+      return true;
+    },
+    dispose: () => {
+      disposed++;
+    },
+  }));
+  try {
+    await f.service.audio(f.id, 1, 0, 'AAECAw==');
+    f.service.end(f.id, 1);
+    f.asrs[0].finishText('你吃个西瓜给我看');
+    await f.until('done');
+    assert.match(f.requests[0].system, /吃西瓜/u);
+    assert.equal(f.requests.length, 1);
+    assert.ok(
+      frames.some(
+        (frame) =>
+          (frame as { type: string; text: string }).type === 'user' &&
+          (frame as { text: string }).text === '你吃个西瓜给我看',
+      ),
+    );
+    assert.ok(
+      frames.some(
+        (frame) =>
+          (frame as { complete?: boolean; text: string }).complete &&
+          (frame as { text: string }).text === '听到了，继续聊呀。',
+      ),
+    );
+    f.service.stopAll();
+    assert.equal(disposed, 1);
   } finally {
     f.service.dispose();
   }

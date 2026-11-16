@@ -113,6 +113,48 @@ test('原生通话载入长期信息，仅最终用户字幕可写入；管理�
   }
 });
 
+test('Codex画面只受理当前有效通话，提示包含动画能力；停止与切换来源拒绝迟到更新', async () => {
+  const f = fixture(),
+    frames: unknown[] = [];
+  let source = 'codex',
+    disposed = 0,
+    prompt = '';
+  Object.assign(f.deps, {
+    source: () => source,
+    presentation: () => ({
+      instructions: () => '可表演吃西瓜',
+      accept: (frame: unknown) => {
+        frames.push(frame);
+        return true;
+      },
+      dispose: () => {
+        disposed++;
+      },
+    }),
+  });
+  f.deps.createCall = async (input) => {
+    prompt = input.prompt;
+    return { answerSdp: 'v=0\r\nanswer', callId: 'test-call' };
+  };
+  try {
+    const call = await f.service.start('main', 'v=0');
+    assert.equal(call.ok, true);
+    if (!call.ok) return;
+    assert.match(prompt, /吃西瓜/u);
+    assert.equal(f.service.present('other', {}), false);
+    assert.equal(f.service.present(call.sessionId, { type: 'user' }), true);
+    source = 'workbuddy';
+    assert.equal(f.service.present(call.sessionId, {}), false);
+    source = 'codex';
+    await f.service.stop(call.sessionId);
+    assert.equal(f.service.present(call.sessionId, {}), false);
+    assert.equal(frames.length, 1);
+    assert.equal(disposed, 1);
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('临时只读会话只接 existingCall，错误编号不能结束或续租；停止幂等', async () => {
   const f = fixture();
   try {
@@ -208,6 +250,9 @@ test('协商只请求固定官方地址；账号凭据仅在请求头，失败�
     assert.ok(!String(init?.body).includes('test-only-token'));
     assert.equal(JSON.parse(String(init?.body)).session.model, 'gpt-live-1.1-codex');
     assert.equal(JSON.parse(String(init?.body)).session.audio, undefined);
+    assert.deepEqual(JSON.parse(String(init?.body)).session.initial_items, [
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: input.prompt }] },
+    ]);
     return new Response('v=0\r\nanswer', { status: 201, headers: { location: '/calls/test-call' } });
   });
   assert.equal(result.callId, 'test-call');

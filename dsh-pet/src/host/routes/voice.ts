@@ -16,7 +16,12 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
   const conversation = await handleConversationRoutes(deps, input);
   if (conversation) return conversation;
 
-  if (rest === 'voice/live/start' || rest === 'voice/live/touch' || rest === 'voice/live/stop') {
+  if (
+    rest === 'voice/live/start' ||
+    rest === 'voice/live/touch' ||
+    rest === 'voice/live/stop' ||
+    rest === 'voice/live/present'
+  ) {
     if (method !== 'POST') return methodNotAllowed();
     if (!deps.liveVoice) return failResult('unsupported', '当前模式未启用 Codex 即时语音。');
     let parsed: unknown;
@@ -38,6 +43,7 @@ export async function handleVoiceRoutes(deps: PetRouteDeps, input: RouteInput): 
     if (typeof value.sessionId !== 'string' || !/^[\w-]{1,200}$/u.test(value.sessionId))
       return failResult('bad-request', '语音会话编号无效。');
     if (rest === 'voice/live/touch') return okResult({ ok: deps.liveVoice.touch(value.sessionId) });
+    if (rest === 'voice/live/present') return okResult({ ok: deps.liveVoice.present(value.sessionId, value.frame) });
     await deps.liveVoice.stop(value.sessionId);
     return okResult({ ok: true });
   }

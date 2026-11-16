@@ -89,7 +89,10 @@ const guard = setTimeout(() => {
     const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
       method: 'POST',
       headers,
-      body: JSON.stringify({ text: '测试。', voice: 'windows/zh-CN' }),
+      body: JSON.stringify({
+        text: process.env.DSH_PET_ACTION_PROBE === '1' ? '你吃个西瓜给我看。' : '测试。',
+        voice: 'windows/zh-CN',
+      }),
     });
     assert.equal(sample.status, 200);
     const b64 = Buffer.from(await sample.arrayBuffer()).toString('base64');
@@ -109,7 +112,7 @@ const guard = setTimeout(() => {
       })
     ).json();
     assert.equal(recognized.ok, true);
-    assert.match(recognized.text, /测试/);
+    assert.match(recognized.text, process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/);
     report.workbuddyUploadedRecognition = recognized.text;
     const wrongCall = await (
       await fetch(origin + '/dsh-pet-7340/voice/live/start', {
@@ -181,6 +184,13 @@ const guard = setTimeout(() => {
     await start('starbell');
     await js('__wbSpeak()');
     await until('__wb.metrics.length>=1', 'first Starbell reply');
+    if (process.env.DSH_PET_ACTION_PROBE === '1')
+      report.presentation = await require('./voice-presentation.cjs')({
+        windows: () => RealWindow.getAllWindows(),
+        origin,
+        headers,
+        run,
+      });
     await js('window.__oldAudios=__wb.audios.slice()');
     await js('__wbSpeak()');
     report.bargeInStoppedOld = await js('__oldAudios.every(audio=>audio.paused)');
@@ -217,7 +227,12 @@ const guard = setTimeout(() => {
     assert.ok(report.workbuddyAsrChildren >= 6);
     assert.equal(report.live.peers, 0);
     assert.ok(report.live.models.length >= 5 && report.live.models.every((model) => model === 'deepseek-v4-flash'));
-    assert.ok(report.live.recognized.length >= 6 && report.live.recognized.every((row) => /测试/.test(row.text)));
+    assert.ok(
+      report.live.recognized.length >= 6 &&
+        report.live.recognized.every((row) =>
+          (process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/).test(row.text),
+        ),
+    );
     assert.equal(report.live.draft, '保留这条草稿');
     assert.equal(report.live.allTracksEnded, true);
     assert.equal(report.live.micEnabled, true);

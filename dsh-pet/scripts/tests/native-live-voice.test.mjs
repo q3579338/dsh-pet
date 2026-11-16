@@ -71,7 +71,14 @@ test(
       assert.equal(report.hostReleased, true);
       assert.equal(report.memoryUntouched, true);
       assert.equal(report.cancelled, true);
-      assert.match(report.dictation, process.env.DSH_PET_MEMORY_PROBE === '1' ? /我喜欢.*咖啡/ : /测试/);
+      assert.match(
+        report.dictation,
+        process.env.DSH_PET_ACTION_PROBE === '1'
+          ? /西瓜/
+          : process.env.DSH_PET_MEMORY_PROBE === '1'
+            ? /我喜欢.*咖啡/
+            : /测试/,
+      );
       assert.equal(report.savedClearedDirty, true);
       assert.equal(report.savedClosed, true);
       assert.equal(report.cancelCloseKeptWindow, true);
@@ -108,6 +115,7 @@ test(
         await writeFile(join(evidence, 'native-live.log'), output);
         for (const file of [
           'result.json',
+          'voice-bubble-action-offscreen.png',
           'live-offscreen.png',
           'native-sweet-voice.wav',
           'starbell-v1.mp3',

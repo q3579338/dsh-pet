@@ -54,6 +54,9 @@ export async function createCodexLiveCall(
             delegation: { type: 'client' },
             model: LIVE_VOICE_MODEL,
             instructions: input.prompt,
+            initial_items: [
+              { type: 'message', role: 'developer', content: [{ type: 'input_text', text: input.prompt }] },
+            ],
             voice_session_id: input.sessionId,
           },
         }),

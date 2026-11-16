@@ -95,6 +95,7 @@ test(
         await writeFile(join(folder, 'native-live.log'), output);
         for (const file of [
           'result.json',
+          'voice-bubble-action-offscreen.png',
           'workbuddy-live-offscreen.png',
           'source-settings-offscreen.png',
           'long-term-memory-offscreen.png',
