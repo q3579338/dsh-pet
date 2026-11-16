@@ -17,6 +17,7 @@ import { registerSessionWatch } from './plugin/session-watch.ts';
 import { createDesktopHelper } from './plugin/desktop-helper.ts';
 import { createBalancePoll } from './plugin/balance-poll.ts';
 import { createChatMemory } from './plugin/chat-memory.ts';
+import { createLongTermMemory } from './long-term-memory/service.ts';
 import { createSessionNotify } from './plugin/session-notify.ts';
 import { createPetLookup } from './plugin/pet-lookup.ts';
 import { createDownloadReport } from './plugin/download-report.ts';
@@ -104,6 +105,17 @@ export function apply(ctx: any): void {
       return typeof selected === 'string' && selected ? selected : undefined;
     },
   });
+  // 原 DSH 宿主仍用第三方注册槽；独立版显式持有自己的本机记忆。
+  const longTermMemory =
+    process.env.DSH_PET_CODEX === '1'
+      ? createLongTermMemory(userRoot, {
+          warn: (message) => log.warn(message),
+          changed: () => {
+            liveVoice?.stopAll();
+            voiceConversation?.stopAll();
+          },
+        })
+      : undefined;
   const chatMemory = createChatMemory({
     ctx,
     configPaths,
@@ -113,6 +125,7 @@ export function apply(ctx: any): void {
     state,
     userRoot,
     warmVoice: (text, selected) => voice.speak({ text, ...(selected ? { voice: selected } : {}) }),
+    memoryProvider: longTermMemory?.provider,
   });
   const { lastWhisperAt, publishWhisper, publishSleepTalk, chatWithPet, getActivePetId, setActivePetId } = chatMemory;
 
@@ -165,6 +178,7 @@ export function apply(ctx: any): void {
     process.env.DSH_PET_CODEX === '1'
       ? createLiveVoiceService({
           home: userRoot,
+          memory: longTermMemory,
           settings: (petId) => {
             const found = findPetInstance(readAllConfig(configPaths), petId);
             if (!found) return undefined;
@@ -198,6 +212,7 @@ export function apply(ctx: any): void {
   const voiceConversation =
     process.env.DSH_PET_CODEX === '1' && voiceAi?.voiceStream
       ? createVoiceConversation({
+          memory: longTermMemory,
           selection: () => voiceAi.voiceSelection?.(),
           ready: () => voiceAi.isReady(),
           prompt: (petId) => {
@@ -233,6 +248,7 @@ export function apply(ctx: any): void {
     ...sessionNotify,
     ctx,
     todos,
+    longTermMemory,
     // 环境查询：/environment 与 system 时间行共用同一个取数口。
     // 传了 city 就照传（空串 = 忽略配置、按 IP 定位，设置页「检测」走这条）；
     // 没传则交回 currentEnvironment 里注入的读取口。

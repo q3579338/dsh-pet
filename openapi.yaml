@@ -1656,6 +1656,89 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
+  /dsh-pet-7340/chat/long-term-memory:
+    parameters:
+      - $ref: "#/components/parameters/PetIdQuery"
+    get:
+      tags: [Config]
+      operationId: getLongTermMemory
+      summary: 查看独立版当前桌宠的本机长期记忆
+      responses:
+        "200":
+          {
+            description: "返回 enabled、revision、facts、directory 和 engine，或业务失败实体",
+          }
+    post:
+      tags: [Config]
+      operationId: saveLongTermMemory
+      summary: 手动补充或修改一条长期事实
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              additionalProperties: false
+              properties:
+                text: { type: string, minLength: 1, maxLength: 360 }
+                id:
+                  {
+                    type: string,
+                    format: uuid,
+                    description: 修改已有条目时提供,
+                  }
+                kind:
+                  {
+                    type: string,
+                    enum:
+                      [
+                        profile,
+                        preference,
+                        promise,
+                        relationship,
+                        event,
+                        lesson,
+                      ],
+                  }
+      responses:
+        "200": { description: 更新后的长期记忆 }
+        "400": { description: 输入格式不合法 }
+    put:
+      tags: [Config]
+      operationId: enableLongTermMemory
+      summary: 开关当前桌宠的长期记忆提取与使用
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              additionalProperties: false
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200": { description: 更新后的开关与已有记忆 }
+        "400": { description: 输入格式不合法 }
+    delete:
+      tags: [Config]
+      operationId: deleteLongTermMemory
+      summary: 删除一条或明确清空该桌宠的长期记忆
+      description: 修改、关闭和删除会结束使用旧记忆的语音通话。普通聊天记录保留，不自动从旧聊天重建长期信息。
+      parameters:
+        - in: query
+          name: id
+          schema: { type: string, format: uuid }
+          description: 要删除的条目，与 all 互斥
+        - in: query
+          name: all
+          schema: { type: string, enum: ["1"] }
+          description: 明确清空全部长期事实，与 id 互斥
+      responses:
+        "200": { description: 删除后的长期记忆 }
+        "400": { description: 未明确指定删除对象 }
+
   /dsh-pet-7340/chat:
     get:
       tags: [Action]

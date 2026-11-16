@@ -6,7 +6,7 @@ import type { ChatPanelRuntime } from './runtime.ts';
 import type { ChatPanelState } from './types.ts';
 import { createCustomSpeechOutput, type CustomSpeechQueue } from './custom-speech.ts';
 import { watchMicrophoneSpeech } from './microphone-activity.ts';
-import { assistantTranscriptDelta } from './live-transcript.ts';
+import { createAssistantTranscript } from './live-transcript.ts';
 import { createWorkBuddyVoiceControl } from './workbuddy-voice.ts';
 import type { LiveControlOptions } from './live-voice-types.ts';
 
@@ -71,8 +71,7 @@ function createCodexLiveVoiceControl(options: {
     firstOutputAt?: number;
     reportedPlayback?: boolean;
     speechFailed?: boolean;
-    outputIds: Set<string>;
-    assistantTurnId?: string;
+    transcript: ReturnType<typeof createAssistantTranscript>;
   };
   let call: Call | undefined;
   let state: LiveData = { ...EMPTY };
@@ -123,7 +122,7 @@ function createCodexLiveVoiceControl(options: {
       abort: new AbortController(),
       peer: new RTCPeerConnection(),
       audio: document.createElement('audio'),
-      outputIds: new Set(),
+      transcript: createAssistantTranscript(),
     };
     call = current;
     setLiveVoiceActive(true);
@@ -197,6 +196,7 @@ function createCodexLiveVoiceControl(options: {
         current.speech.begin();
         current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
           if (!relevant()) return;
+          current.transcript.interrupt();
           if (current.speech?.busy()) current.speech.interrupt();
           current.speech?.prime?.();
         });
@@ -209,39 +209,23 @@ function createCodexLiveVoiceControl(options: {
         try {
           const value = record(JSON.parse(event.data));
           const item = record(value.item);
-          const turn = record(value.turn);
           if (value.type === 'input_transcript.added') paint({ user: text(item.text) });
-          if (value.type === 'output_transcript.added') {
-            if (typeof item.id === 'string') {
-              if (current.outputIds.has(item.id)) return;
-              current.outputIds.add(item.id);
-            }
-            const part = text(item.text);
-            if (part && !current.firstOutputAt) current.firstOutputAt = Date.now();
-            paint({ pet: (state.pet + part).slice(-6000) });
-            current.speech?.append(part);
-          }
-          if (value.type === 'turn.created' && turn.role === 'assistant') {
+          const transcript = current.transcript.accept(value);
+          if (transcript.begin) {
             current.speechFailed = false;
-            current.assistantTurnId = typeof turn.id === 'string' ? turn.id : undefined;
             paint({ pet: '' });
-            current.outputIds.clear();
             current.firstOutputAt = undefined;
             current.reportedPlayback = false;
             current.speech?.begin();
           }
-          const delta = assistantTranscriptDelta(value, current.assistantTurnId);
+          const delta = transcript.delta;
           if (delta) {
             if (!current.firstOutputAt) current.firstOutputAt = Date.now();
-            paint({ pet: (state.pet + delta).slice(-6000) });
+            paint({ pet: transcript.full ?? (state.pet + delta).slice(-6000) });
             current.speech?.append(delta);
           }
-          if (
-            value.type === 'turn.done' &&
-            turn.role === 'assistant' &&
-            (!current.assistantTurnId || turn.id === current.assistantTurnId)
-          ) {
-            const full = text(turn.transcript);
+          if (transcript.done) {
+            const full = transcript.full;
             if (full) paint({ pet: full });
             current.speech?.finish(full);
           }
@@ -341,6 +325,7 @@ function createCodexLiveVoiceControl(options: {
       else void start();
     },
     interrupt() {
+      call?.transcript.interrupt();
       call?.speech?.interrupt();
       if (call) paint({ message: '已停止这一句，麦克风仍在接收，可以继续说话。' });
     },

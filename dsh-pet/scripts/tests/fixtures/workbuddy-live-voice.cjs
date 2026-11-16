@@ -78,6 +78,14 @@ const guard = setTimeout(() => {
       })
     ).json();
     assert.equal(settings.protocol, 'workbuddy');
+    const remembered = await (
+      await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: '用户希望被称为「记忆测试星」', kind: 'profile' }),
+      })
+    ).json();
+    assert.equal(remembered.ok, true);
     const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
       method: 'POST',
       headers,
@@ -268,6 +276,7 @@ const guard = setTimeout(() => {
     assert.equal(report.sourceAtTop, true);
     await js("document.querySelector('#save').click()");
     await until("!document.querySelector('#dirty')||document.querySelector('#dirty').hidden", 'save source');
+    report.longTermMemoryUi = await require('./long-term-memory-ui.cjs')({ chat, js, origin, headers, run });
     chat.setSize(390, 844);
     await js("document.querySelector('#panel-config .scroll').scrollTop=0");
     await wait(100);

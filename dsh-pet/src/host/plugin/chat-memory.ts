@@ -29,6 +29,7 @@ import {
   type ChatContent,
   type ChatContentPatch,
   type ChatTurn,
+  type ChatMemoryProvider,
 } from '../chat-memory-provider.ts';
 
 /** 第三方召回的硬超时（ms）：到点按“不修改内容”继续生成，不拖住这一轮对话。 */
@@ -51,6 +52,8 @@ function voiceTargetFor(pet: Record<string, unknown>): VoiceTarget | undefined {
 
 /** 对话与记忆的输入：装配期对象与更早的工厂。 */
 export type ChatMemoryInput = {
+  /** 独立版显式注入，避免多个宿主实例共用全局注册槽。 */
+  memoryProvider?: ChatMemoryProvider;
   /** 提前合成首句，与正常朗读共用缓存和在途请求。 */
   warmVoice?: (text: string, voice?: string) => Promise<unknown>;
   /** 宿主上下文（apply 收到的那一个）。 */
@@ -183,7 +186,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
    * @returns 合法的覆盖字段；没有可应用的字段时 undefined。
    */
   const recallPatch = async (petId: string, content: ChatContent): Promise<ChatContentPatch | undefined> => {
-    const provider = activeChatMemoryProvider();
+    const provider = deps.memoryProvider ?? activeChatMemoryProvider();
     const recall = provider?.recall;
     if (!provider || !recall) return undefined;
     let timer: NodeJS.Timeout | undefined;
@@ -219,7 +222,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
     petId: string,
     turn: { userText: string; replyText: string; action?: string; image?: string; ts: number },
   ): void => {
-    const provider = activeChatMemoryProvider();
+    const provider = deps.memoryProvider ?? activeChatMemoryProvider();
     const capture = provider?.capture;
     if (!provider || !capture) return;
     void Promise.resolve()

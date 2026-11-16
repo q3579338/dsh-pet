@@ -59,6 +59,7 @@ function mountBalanceSelect() {
 
 function selectTab(name) {
   stopVoicePreview();
+  if (name === 'memory') loadLongTermMemory();
   if (name !== 'chat') document.dispatchEvent(new Event('pet-stop-live-voice'));
   for (const cell of document.querySelectorAll('[data-tab]')) {
     const active = cell.dataset.tab === name;
@@ -146,7 +147,9 @@ async function loadAi() {
 function boot() {
   window.addEventListener('pagehide', stopVoicePreview);
   wireTabs();
-  selectTab(new URLSearchParams(location.search).get('view') === 'config' ? 'config' : 'chat');
+  wireMemory();
+  const view = new URLSearchParams(location.search).get('view');
+  selectTab(view === 'config' || view === 'memory' ? view : 'chat');
   // 刷新后地址栏里的令牌已被清掉，此时靠首次访问换来的 HttpOnly cookie 继续；
   // cookie 也没了的时候，各面板自己的请求会失败并显示重新打开设置的提示。
   mountProtocolSelect();

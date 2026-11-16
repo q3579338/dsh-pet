@@ -19,6 +19,7 @@ globalThis.fetch = async (url, init) => {
       voice: value.session?.audio?.output?.voice,
       model: value.session?.model,
       hasStyle: value.session?.instructions?.includes('【声音与节奏】') === true,
+      hasLongMemory: value.session?.instructions?.includes('记忆测试星') === true,
     });
   }
   return originalFetch(url, init);
@@ -111,6 +112,14 @@ const guard = setTimeout(() => {
         body: JSON.stringify({ protocol: 'codex', model: 'gpt-6-luna' }),
       });
     }
+    const remembered = await (
+      await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ text: '用户希望被称为「记忆测试星」', kind: 'profile' }),
+      })
+    ).json();
+    assert.equal(remembered.ok, true);
     app.emit('codex-bigfish:chat');
     let chat;
     for (let i = 0; i < 100; i++) {

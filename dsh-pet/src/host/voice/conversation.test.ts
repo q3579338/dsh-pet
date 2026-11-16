@@ -6,13 +6,14 @@ import type { ConversationEvent } from '../../shared/voice-conversation.ts';
 import type { AiRequest } from '../../standalone/ai-transport.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
 
-async function fixture() {
+async function fixture(memory?: Parameters<typeof createVoiceConversation>[0]['memory']) {
   const asrs: Array<StreamingDictation & { finishText(text: string): void; stopped: boolean; chunks: number }> = [];
   const requests: AiRequest[] = [],
     states: boolean[] = [];
   let selected = { protocol: 'workbuddy', model: 'deepseek-v4-flash' };
   let ready = true;
   const service = createVoiceConversation({
+    memory,
     selection: () => selected,
     ready: () => ready,
     prompt: (id) => (id === 'fish' ? '你是大肥鱼。' : undefined),
@@ -84,6 +85,28 @@ async function fixture() {
     },
   };
 }
+test('WorkBuddy 连续语音召回长期事实，只提交实际用户转写，停止后可以重连', async () => {
+  const heard: string[] = [];
+  const f = await fixture({
+    context: () => '\n用户希望被称为「星宝」',
+    remember: (_pet, text) => {
+      heard.push(text);
+      return 1;
+    },
+  });
+  try {
+    await f.service.audio(f.id, 1, 0, 'AAECAw==');
+    f.service.end(f.id, 1);
+    f.asrs[0].finishText('我喜欢咖啡');
+    await f.until('done');
+    assert.deepEqual(heard, ['我喜欢咖啡']);
+    assert.match(f.requests[0].system, /星宝/u);
+    f.service.stopAll();
+    assert.equal((await f.service.start('fish', 'dango')).ok, true);
+  } finally {
+    f.service.dispose();
+  }
+});
 test('WorkBuddy 识别启动失败提示自己的来源，不显示原始错误或 Codex 登录提示', async () => {
   const states: boolean[] = [];
   const service = createVoiceConversation({

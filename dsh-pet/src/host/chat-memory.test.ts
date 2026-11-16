@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import { createChatMemory, type ChatMemoryInput } from './plugin/chat-memory.ts';
+import { createLongTermMemory } from './long-term-memory/service.ts';
 import type { ChatMemoryMessage } from './chat.ts';
 import type { ConfigPaths } from './config.ts';
 import type { PetImageRef } from './image-attachment.ts';
@@ -111,6 +112,26 @@ function readMessages(userRoot: string): ChatMemoryMessage[] {
 }
 
 describe('createChatMemory —— 存档保护', () => {
+  test('关闭近期历史后仍召回长期称呼，不改写既有普通聊天记录', async () => {
+    const ws = tempWorkspace({ chatMemoryRounds: 0 });
+    const captured: Record<string, unknown>[] = [];
+    const longTerm = createLongTermMemory(ws.userRoot, { warn() {} });
+    try {
+      await createMemory('记住啦', ws, undefined, undefined, captured, {
+        memoryProvider: longTerm.provider,
+      }).chatWithPet('main', '我叫星宝');
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.match(longTerm.context('main'), /星宝/u);
+      await createMemory('星宝你好', ws, undefined, undefined, captured, {
+        memoryProvider: longTerm.provider,
+      }).chatWithPet('main', '我叫什么');
+      assert.match(JSON.stringify(captured[1]), /用户希望被称为/u);
+      assert.equal(readMessages(ws.userRoot)[0].content, '我叫星宝');
+      assert.equal(readMessages(ws.userRoot).length, 4);
+    } finally {
+      rmSync(ws.dir, { recursive: true, force: true });
+    }
+  });
   for (const raw of ['{"main":', '[]', 'null', '{"main": []}', '{"main":{"main":{"messages":null}}}']) {
     test('异常记忆不能被下一轮聊天覆盖：' + raw, async () => {
       const ws = tempWorkspace();

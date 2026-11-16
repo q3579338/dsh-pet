@@ -50,7 +50,8 @@ before(async () => {
       id.startsWith('node:') ||
       (id.startsWith('@deepseek-ai/') && !(id in aliases)) ||
       id.startsWith('@andresaya/edge-tts/') ||
-      ['zod', '@electron/get', '@electron-internal/extract-zip', '@andresaya/edge-tts'].includes(id),
+      // 长期记忆路由使用已声明的 zod；临时包不带 node_modules，将校验器一并打入。
+      ['@electron/get', '@electron-internal/extract-zip', '@andresaya/edge-tts'].includes(id),
     plugins: [{ name: 'standalone-test-shims', resolveId: (id) => aliases[id] }],
   });
   const entry = join(pkg, 'lib/host.mjs');

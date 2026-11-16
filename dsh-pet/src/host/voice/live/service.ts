@@ -7,11 +7,13 @@ import { companionThreadConfig, parseChatModels, selectChatModel } from '../../.
 import { readCodexSpeechIdentity } from '../codex/auth.ts';
 import { createCodexLiveCall, LiveVoiceError } from './http.ts';
 import { DEFAULT_LIVE_VOICE_STYLE, liveVoiceStyle } from '../../../shared/live-voice-style.ts';
+import type { LongTermMemory } from '../../long-term-memory/service.ts';
 
 /** 页面拿不到账号令牌，只拿到这次协商必需的 SDP 和本地会话编号。 */
 export type LiveStartResult = { ok: true; sessionId: string; answerSdp: string } | { ok: false; message: string };
 /** 结束操作幂等；编号不匹配时不会影响其他通话。 */
 export interface LiveVoiceService {
+  stopAll(): void;
   start(petId: string, sdp: string, signal?: AbortSignal, styleId?: string): Promise<LiveStartResult>;
   touch(sessionId: string): boolean;
   stop(sessionId: string): Promise<void>;
@@ -22,6 +24,7 @@ export interface LiveVoiceService {
 type LiveClient = Pick<CodexClient, 'initialize' | 'request' | 'onNotification' | 'onClose' | 'close'>;
 /** 提示词与普通对话模型按当前宠物读取，网络能力可由隔离测试替换。 */
 interface LiveDependencies {
+  memory?: Pick<LongTermMemory, 'context' | 'remember'>;
   home: string;
   settings(petId: string): { prompt: string; model: string } | undefined;
   activeChanged(active: boolean): void;
@@ -80,12 +83,18 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
     }
   };
   return {
+    stopAll() {
+      if (active) release(active);
+    },
     async start(petId, sdp, signal, styleId = DEFAULT_LIVE_VOICE_STYLE) {
       if (deps.source && deps.source() !== 'codex')
         return { ok: false, message: 'Codex 原声仅用于 Codex 连接。当前选择 WorkBuddy 时请使用自定义音色。' };
       if (deps.busy?.()) return { ok: false, message: '请先结束当前的 WorkBuddy 连续语音。' };
       if (signal?.aborted) return { ok: false, message: '即时语音已停止。' };
-      const settings = deps.settings(petId);
+      const selected = deps.settings(petId);
+      const settings = selected
+        ? { ...selected, prompt: selected.prompt + (deps.memory?.context(petId) ?? '') }
+        : undefined;
       const style = liveVoiceStyle(styleId);
       if (!style) return { ok: false, message: '没有找到所选的即时语音风格，请重新选择。' };
       if (!settings || !sdp.startsWith('v=0') || sdp.length > 65536)
@@ -148,8 +157,12 @@ export function createLiveVoiceService(deps: LiveDependencies): LiveVoiceService
           signal: room.abort.signal,
         });
         room.off = room.client.onNotification(({ method, params }) => {
-          if (params.threadId !== threadId) return;
-          if (method === 'thread/realtime/transcript/done') room.activity = Date.now();
+          if (params.threadId !== threadId || room.released) return;
+          if (method === 'thread/realtime/transcript/done') {
+            room.activity = Date.now();
+            if (params.role === 'user' && typeof params.text === 'string' && params.text.length <= 5000)
+              deps.memory?.remember(petId, params.text, 'codex-voice');
+          }
           if (method === 'thread/realtime/error' || method === 'thread/realtime/closed') release(room);
         });
         await room.client.request(

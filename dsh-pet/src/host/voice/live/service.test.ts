@@ -50,7 +50,10 @@ function fixture() {
     activeChanged: (active: boolean) => changes.push(active),
     createClient: () => client,
     identity: async () => ({ token: 'test-only-token' }),
-    createCall: async () => ({ answerSdp: 'v=0\r\nanswer', callId: 'test-call' }),
+    createCall: async (input: Parameters<typeof createCodexLiveCall>[0]) => {
+      void input;
+      return { answerSdp: 'v=0\r\nanswer', callId: 'test-call' };
+    },
   };
   const service = createLiveVoiceService(deps);
   return {
@@ -59,7 +62,8 @@ function fixture() {
     requests,
     changes,
     closed: () => closed,
-    notify: (method: string) => notify?.({ method, params: { threadId: 'test-thread' } }),
+    notify: (method: string, params: Record<string, unknown> = {}) =>
+      notify?.({ method, params: { threadId: 'test-thread', ...params } }),
     cleanup: () => {
       service.dispose();
       assert.ok(resolve(home).startsWith(resolve(tmpdir()) + sep));
@@ -67,6 +71,38 @@ function fixture() {
     },
   };
 }
+
+test('原生通话载入长期信息，仅最终用户字幕可写入；管理后结束旧通话，允许重新连接', async () => {
+  const f = fixture(),
+    remembered: string[] = [];
+  let usedPrompt = '';
+  f.deps.createCall = async (input) => {
+    usedPrompt = input.prompt;
+    return { answerSdp: 'v=0\r\nanswer', callId: 'test-call' };
+  };
+  Object.assign(f.deps, {
+    memory: {
+      context: () => '\n用户希望被称为「星宝」',
+      remember: (_id: string, text: string) => {
+        remembered.push(text);
+        return 1;
+      },
+    },
+  });
+  try {
+    assert.equal((await f.service.start('main', 'v=0\r\ntest')).ok, true);
+    assert.match(usedPrompt, /星宝/u);
+    f.notify('thread/realtime/transcript/done', { role: 'assistant', text: '模型虚构的事实' });
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '不该记录', threadId: 'other' });
+    f.notify('thread/realtime/transcript/done', { role: 'user', text: '我喜欢咖啡' });
+    assert.deepEqual(remembered, ['我喜欢咖啡']);
+    f.service.stopAll();
+    assert.ok(f.closed() > 0);
+    assert.equal((await f.service.start('main', 'v=0\r\ntest')).ok, true);
+  } finally {
+    f.cleanup();
+  }
+});
 
 test('临时只读会话只接 existingCall，错误编号不能结束或续租；停止幂等', async () => {
   const f = fixture();

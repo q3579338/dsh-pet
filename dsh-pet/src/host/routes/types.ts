@@ -23,6 +23,7 @@ import type { TodoStore } from '../todo/store.ts';
 import type { HearService } from '../voice/hear.ts';
 import type { LiveVoiceService } from '../voice/live/service.ts';
 import type { VoiceConversationService } from '../voice/conversation.ts';
+import type { LongTermMemory } from '../long-term-memory/service.ts';
 import type { VoiceService } from '../voice/speak.ts';
 import type { WorkStatusStore } from '../work-status.ts';
 
@@ -70,6 +71,7 @@ export type RouteHandler = (deps: PetRouteDeps, input: RouteInput) => Promise<Ro
  * 唯一有副作用的是 `nextExternalWorkSeq`：它推进外部写入序号并返回新值。
  */
 export interface PetRouteDeps {
+  readonly longTermMemory?: LongTermMemory;
   /** 配置路径集（内置默认 + 用户主配置 + 文件宠物目录）。 */
   readonly configPaths: ConfigPaths;
   /** 第三方右键菜单注册表（进程内存态）。 */

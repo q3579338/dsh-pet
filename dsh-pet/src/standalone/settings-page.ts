@@ -17,6 +17,7 @@ import { DEFAULT_FONT, FONT_PRESETS } from '../shared/fonts.ts';
 import { DEFAULT_PHYSICS } from '../shared/physics.ts';
 import { DEFAULT_WEIGHTS } from '../shared/weights.ts';
 import { aiScript } from './settings-page/script/ai.ts';
+import { memoryScript } from './settings-page/script/memory.ts';
 import { avatarScript } from './settings-page/script/avatar.ts';
 import { bootScript } from './settings-page/script/boot.ts';
 import { coreScript } from './settings-page/script/core.ts';
@@ -60,6 +61,7 @@ export const settingsScript = [
   globalsScript(),
   modelPickerScript(),
   aiScript(),
+  memoryScript(),
   bootScript(),
   'boot();',
   '})();',

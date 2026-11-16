@@ -6,9 +6,11 @@ import type { ConversationEvent } from '../../shared/voice-conversation.ts';
 import type { AiRequest } from '../../standalone/ai-transport.ts';
 import type { WorkBuddyEvent } from '../../standalone/workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
+import type { LongTermMemory } from '../long-term-memory/service.ts';
 
 /** 宿主仅提供当前模型、角色与实际调用，测试不访问真实账号。 */
 export interface ConversationDependencies {
+  memory?: Pick<LongTermMemory, 'context' | 'remember'>;
   selection(): { protocol: string; model: string } | undefined;
   prompt(petId: string): string | undefined;
   stream(model: string, request: AiRequest, signal: AbortSignal): AsyncIterable<WorkBuddyEvent>;
@@ -20,6 +22,7 @@ export interface ConversationDependencies {
 }
 /** 本地会话编号只用于当前进程，关闭后不保留音频与聊天记录。 */
 export interface VoiceConversationService {
+  stopAll(): void;
   options(): { workbuddy: boolean; model: string; source: string };
   start(
     petId: string,
@@ -40,6 +43,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   type Input = { id: number; sequence: number; epoch: number; asr: StreamingDictation; bytes: number };
   type Room = {
     id: string;
+    petId: string;
     model: string;
     prompt: string;
     abort: AbortController;
@@ -141,6 +145,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       const selection = deps.selection();
       if (selection?.protocol !== 'workbuddy' || selection.model !== room.model)
         throw new WorkBuddyFailure('模型设置已变化，请结束语音后重新开始。');
+      deps.memory?.remember(room.petId, user, 'workbuddy-voice');
       const abort = new AbortController();
       room.reply = abort;
       emit(room, { type: 'reply' });
@@ -148,7 +153,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       for await (const event of deps.stream(
         room.model,
         {
-          system: room.prompt,
+          system: room.prompt + (deps.memory?.context(room.petId, user) ?? ''),
           messages: [...room.history, { role: 'user', content: user }],
         },
         AbortSignal.any([room.abort.signal, abort.signal]),
@@ -185,6 +190,9 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     }
   };
   return {
+    stopAll() {
+      if (active) release(active);
+    },
     options,
     async start(petId, styleId, signal) {
       const selected = options(),
@@ -197,6 +205,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       if (active || deps.busy?.()) return { ok: false, message: '已有即时语音正在连接或聊天，请先结束。' };
       const room: Room = {
         id: randomUUID(),
+        petId,
         model: selected.model,
         prompt:
           prompt +

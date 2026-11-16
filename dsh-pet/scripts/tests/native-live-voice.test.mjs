@@ -79,6 +79,10 @@ test(
       assert.ok(report.live.peak > 0.001);
       assert.equal(report.bargeInStoppedOld, true);
       assert.equal(report.nativeDirect, true);
+      assert.ok(
+        report.nativeCalls.length > 0 && report.nativeCalls.every((row) => row.hasLongMemory),
+        'Every native voice connection loads the durable local memory',
+      );
       assert.equal(report.rememberedTone, 'dango');
       for (const id of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
         assert.ok(report.custom.played.includes('bigfish-cute/' + id));

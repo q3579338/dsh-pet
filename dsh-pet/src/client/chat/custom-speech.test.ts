@@ -1,11 +1,53 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createCustomSpeechQueue } from './custom-speech.ts';
+import { createAssistantTranscript } from './live-transcript.ts';
 
 /** 让队列的 Promise 链完成一轮，不需要真实计时或音频设备。 */
 async function tick(): Promise<void> {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 }
+
+test('真实朗读队列只合成一次双路字幕，日期数字不结巴、不在最终字幕到来时重念', async () => {
+  const requested: string[] = [],
+    played: string[] = [];
+  const stream = createAssistantTranscript();
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail(),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        return new Blob([text]);
+      },
+      play: async (audio) => {
+        assert.ok(audio instanceof Blob);
+        played.push(await audio.text());
+      },
+    },
+  });
+  const accept = (event: Record<string, unknown>) => {
+    const row = stream.accept(event);
+    if (row.begin) queue.begin();
+    if (row.delta) queue.append(row.delta);
+    if (row.done) queue.finish(row.full);
+  };
+  try {
+    accept({ type: 'turn.created', turn: { id: 'a', role: 'assistant' } });
+    const words = ['今天是', '2026', '年', '11', '月', '16', '日，', '星期一。'];
+    for (let i = 0; i < words.length; i++) {
+      accept({ type: 'turn.delta', turn_id: 'a', delta: words[i] });
+      accept({ type: 'output_transcript.added', item: { id: 'p' + i, text: words[i] } });
+      await tick();
+    }
+    accept({ type: 'turn.done', turn: { id: 'a', role: 'assistant', transcript: words.join('') } });
+    for (let i = 0; i < 4; i++) await tick();
+    assert.equal(requested.join(''), words.join(''));
+    assert.equal(played.join(''), words.join(''));
+    assert.equal(requested.filter((text) => text.includes('2026')).length, 1);
+  } finally {
+    queue.dispose();
+  }
+});
 
 test('问候语碎片合并成完整短句，不能把嗨、你好拆成多段造成结巴', async () => {
   const requested: string[] = [];

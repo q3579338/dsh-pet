@@ -20,6 +20,7 @@ export const settingsPage = `<!doctype html>
 <nav class="nav" aria-label="设置分区"><div class="navList" role="tablist">
 <button type="button" class="navCell" role="tab" id="tab-chat" data-tab="chat" data-title="对话" aria-controls="panel-chat" aria-selected="true"><svg class="navGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.4h10a1.1 1.1 0 0 1 1.1 1.1v5.6A1.1 1.1 0 0 1 13 11.2H8.2L5 13.6v-2.4H3a1.1 1.1 0 0 1-1.1-1.1V4.5A1.1 1.1 0 0 1 3 3.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span class="navLabel">对话</span></button>
 <button type="button" class="navCell" role="tab" id="tab-config" data-tab="config" data-title="配置" aria-controls="panel-config" aria-selected="false"><svg class="navGlyph" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2.6 4.6h10.8M2.6 11.4h10.8"/><circle cx="6.2" cy="4.6" r="1.6" fill="currentColor" stroke="none"/><circle cx="9.8" cy="11.4" r="1.6" fill="currentColor" stroke="none"/></g></svg><span class="navLabel">配置</span></button>
+<button type="button" class="navCell" role="tab" id="tab-memory" data-tab="memory" data-title="长期记忆" aria-controls="panel-memory" aria-selected="false"><span class="navGlyph" aria-hidden="true">♡</span><span class="navLabel">记忆</span></button>
 </div></nav>
 <div class="sideFoot">大肥鱼 · Codex 适配<span id="app-version"></span></div>
 </aside>
@@ -44,7 +45,7 @@ export const settingsPage = `<!doctype html>
 </div>
 <p id="privacy" class="fineprint">所有配置与密钥仅保存在当前机器。</p>
 </form>
-<div class="card"><div class="cardHead"><h2 class="cardTitle">聊天记忆</h2></div><p class="cardHint">普通聊天记录保存在本机数据目录的 memory.json，可在对话页查看记录和记忆线。即时语音只保留本通上下文，结束后不写入普通聊天记忆。</p></div>
+<div class="card"><div class="cardHead"><h2 class="cardTitle">聊天与长期记忆</h2><button class="btn" type="button" id="open-long-term-memory">查看长期记忆</button></div><p class="cardHint">普通聊天记录仍保存在 memory.json。长期记忆另外保存用户明确表达的称呼、喜好和约定，文字与即时语音共用；切换模型也能继续使用。可在记忆页关闭、修改或删除。</p></div>
 <div id="pet-cards"><p class="empty">正在读取本机配置…</p></div>
 <div class="footer"><p class="status" id="pet-status" role="status" aria-live="polite"></p><button class="btn primary" id="pet-save" type="button" disabled>保存桌宠设置</button></div>
 </div>
@@ -52,6 +53,17 @@ export const settingsPage = `<!doctype html>
 <section class="panel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
 <div class="pet-chat-host" id="pet-chat-root"></div>
 </section>
+<section class="panel" id="panel-memory" role="tabpanel" aria-labelledby="tab-memory" hidden><div class="scroll">
+<div class="card"><div class="cardHead"><h2 class="cardTitle">长期记忆 · 本机</h2><button class="btn" id="memory-refresh" type="button">刷新</button></div>
+<p class="cardHint">自动整理你明确说过的称呼、喜好和约定。规则提取可能有遗漏，可在下方纠正。每只桌宠单独保存，Codex 与 WorkBuddy 共用同一只桌宠的记忆。</p>
+<div class="field"><label for="memory-pet">选择桌宠</label><select id="memory-pet"></select></div>
+<label class="memory-switch"><input id="memory-enabled" type="checkbox">自动记住并使用长期信息</label>
+<p class="fieldHint">信息保存在本机，使用时会随提示词发送给当前模型。关闭后停止提取和使用，已有信息保留。修改或删除会结束当前语音，重新开始后生效。</p>
+<p class="status" id="memory-status" role="status" aria-live="polite">选择此页后读取。</p>
+<p class="fieldHint" id="memory-directory"></p></div>
+<div class="card"><div class="cardHead"><h2 class="cardTitle">已记住的信息</h2><button class="btn" id="memory-clear" type="button">清空长期记忆</button></div><div id="memory-confirm" hidden></div><div id="memory-items"></div></div>
+<div class="card"><h2 class="cardTitle">手动补充或纠正</h2><form id="memory-editor"><input type="hidden" id="memory-edit-id"><div class="field"><label for="memory-kind">类型</label><select id="memory-kind"><option value="profile">称呼与个人信息</option><option value="preference">喜好</option><option value="promise">约定</option><option value="relationship">关系</option><option value="event">重要事件</option><option value="lesson">习惯与经验</option></select></div><div class="field"><label for="memory-text">要记住的事实</label><textarea id="memory-text" rows="3" maxlength="360" required placeholder="例如：用户希望被称为「星宝」；用户不喜欢喝咖啡。"></textarea></div><div class="memory-actions"><button type="submit" class="btn primary" id="memory-save">保存这条记忆</button><button type="button" class="btn" id="memory-edit-cancel" hidden>取消修改</button></div></form></div>
+</div></section>
 </div>
 </div>
 </main>

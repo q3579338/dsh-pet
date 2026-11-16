@@ -82,6 +82,7 @@ test(
       assert.equal(report.workbuddyBalanceShown, true);
       assert.equal(report.codexBalanceShown, true);
       assert.equal(report.sourceAtTop, true);
+      assert.equal(report.longTermMemoryUi, true);
       assert.equal(report.codexDictationCalls, 0);
       assert.ok(report.workbuddyAsrChildren >= 6);
       for (const voice of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
@@ -96,6 +97,7 @@ test(
           'result.json',
           'workbuddy-live-offscreen.png',
           'source-settings-offscreen.png',
+          'long-term-memory-offscreen.png',
           'starbell-v1.mp3',
           'sugarbud-v1.mp3',
           'dango-v1.mp3',

@@ -1,5 +1,7 @@
 # dsh-pet 对外 HTTP 接口一览
 
+独立适配版另提供 `GET/POST/PUT/DELETE /dsh-pet-7340/chat/long-term-memory?pet=<id>`，用于查看、补充/修改、开关与明确删除本机长期记忆；单条删除带 `id`，清空带 `all=1`，两者互斥。使用当前运行凭据鉴权，不接收网页提供的存储路径或模型密钥。完整字段见 `openapi.yaml`。原宿主未启用此实现时返回 `unsupported`。
+
 dsh-pet 的宿主半侧向 DSH 自己的 Web 服务注册了**一条前缀路由** `/dsh-pet-7340`，浏览器端、
 桌面端、设置页与第三方插件全都访问同一份实现。本文只做**功能预览**（接口名 + 一句话），
 完整契约——参数、响应体、字段含义、错误码与示例——见根目录的 [`openapi.yaml`](openapi.yaml)。

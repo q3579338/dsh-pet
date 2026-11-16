@@ -38,4 +38,11 @@ test('模型保存只清除模型改动，不吞掉尚未保存的宠物设置',
   assert.equal(badge.hidden, false);
   api.markDirty(false);
   assert.equal(api.state.dirty, false);
+  api.markDirty(true, 'memory');
+  api.markDirty(true, 'ai');
+  api.markDirty(false, 'ai');
+  api.markDirty(false, 'pets');
+  assert.equal(api.state.dirty, true, '连接或桌宠保存不能吞掉长期记忆编辑草稿');
+  api.markDirty(false, 'memory');
+  assert.equal(api.state.dirty, false);
 });
