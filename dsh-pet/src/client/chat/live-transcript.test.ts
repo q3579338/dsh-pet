@@ -64,3 +64,32 @@ test('重复事件、旧轮、用户轮和打断后的迟到字幕不再进入�
   stream.interrupt();
   assert.deepEqual(stream.accept({ type: 'turn.delta', turn_id: 'new', delta: '迟到' }), {});
 });
+test('新轮尚未确认的无归属旧字幕不能抢先朗读，等待本轮增量或最终文本', () => {
+  const stream = createAssistantTranscript();
+  stream.accept({ type: 'turn.created', turn: { id: 'old', role: 'assistant' } });
+  stream.interrupt();
+  stream.accept({ type: 'turn.created', turn: { id: 'new', role: 'assistant' } });
+  assert.deepEqual(
+    stream.accept({ type: 'output_transcript.added', item: { id: 'late-old', text: '上一次的回复' } }),
+    {},
+  );
+  assert.equal(stream.accept({ type: 'turn.delta', turn_id: 'new', delta: '新的回答' }).delta, '新的回答');
+  assert.equal(
+    stream.accept({ type: 'turn.done', turn: { id: 'new', role: 'assistant', transcript: '新的回答' } }).full,
+    '新的回答',
+  );
+});
+test('仅无归属字幕的旧协议在最终确认后仍能完成，带轮编号的片段仍即时返回', () => {
+  const stream = createAssistantTranscript();
+  stream.accept({ type: 'turn.created', turn: { id: 'one', role: 'assistant' } });
+  assert.deepEqual(stream.accept({ type: 'output_transcript.added', item: { id: 'a', text: '你好' } }), {});
+  assert.equal(
+    stream.accept({ type: 'turn.done', turn: { id: 'one', role: 'assistant', transcript: '你好' } }).full,
+    '你好',
+  );
+  stream.accept({ type: 'turn.created', turn: { id: 'two', role: 'assistant' } });
+  assert.equal(
+    stream.accept({ type: 'output_transcript.added', turn_id: 'two', item: { id: 'b', text: '即时文字' } }).delta,
+    '即时文字',
+  );
+});

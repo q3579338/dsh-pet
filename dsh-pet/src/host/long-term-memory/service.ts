@@ -5,6 +5,7 @@ import { isNearDuplicate } from '../../vendor/dsh-pet-memory/extract.mjs';
 import type { ChatMemoryProvider } from '../chat-memory-provider.ts';
 import { createLongTermMemoryStore, MAX_MEMORY_FACTS } from './store.ts';
 import { memoryCandidates, safeMemoryText } from './extract.ts';
+import { canonicalMemoryKey, factMemoryKey } from './keys.ts';
 import { MEMORY_KINDS, type MemoryKind, type MemorySource, type MemoryState } from './types.ts';
 
 export function createLongTermMemory(
@@ -37,8 +38,9 @@ export function createLongTermMemory(
       if (!state.enabled || (revision !== undefined && state.revision !== revision)) return 0;
       let changes = 0;
       for (const candidate of memoryCandidates(text)) {
-        const previous = state.facts.find((item) => item.key === candidate.key);
-        if (previous?.text === candidate.text) continue;
+        const matches = state.facts.filter((item) => factMemoryKey(item) === candidate.key);
+        const previous = matches.sort((a, b) => b.ts - a.ts)[0];
+        if (previous?.text === candidate.text && matches.length === 1 && previous.key === candidate.key) continue;
         if (
           !previous &&
           isNearDuplicate(
@@ -50,8 +52,8 @@ export function createLongTermMemory(
           continue;
         if (!previous && state.facts.length >= MAX_MEMORY_FACTS) continue;
         const fact = { ...candidate, id: previous?.id ?? randomUUID(), source, ts: now() };
-        if (previous) state.facts[state.facts.indexOf(previous)] = fact;
-        else state.facts.push(fact);
+        state.facts = state.facts.filter((item) => factMemoryKey(item) !== candidate.key);
+        state.facts.push(fact);
         changes++;
       }
       if (changes) store.write(petId, state);
@@ -65,8 +67,15 @@ export function createLongTermMemory(
     try {
       const state = store.read(petId);
       if (!state.enabled || !state.facts.length) return '';
-      const available = state.facts.filter((item) => safeMemoryText(item.text));
-      const names = available.filter((item) => item.key === 'name');
+      const byKey = new Map<string, MemoryState['facts'][number]>();
+      for (const item of state.facts) {
+        if (!safeMemoryText(item.text)) continue;
+        const key = factMemoryKey(item),
+          previous = byKey.get(key);
+        if (!previous || previous.ts <= item.ts) byKey.set(key, item);
+      }
+      const available = [...byKey.values()];
+      const names = available.filter((item) => factMemoryKey(item) === 'name');
       const ranked = recall({ facts: () => available }, query || '用户 称呼 喜欢 习惯 约定', { limit: 7 });
       const selected = [...new Map([...names, ...ranked].map((item) => [item.id, item])).values()].slice(0, 8);
       if (!selected.length) return '';
@@ -135,19 +144,25 @@ export function createLongTermMemory(
       return mutate(petId, (state) => {
         const previous = id ? state.facts.find((item) => item.id === id) : undefined;
         if (id && !previous) throw Error('这条长期记忆已不存在，请刷新。');
-        if (!previous && state.facts.length >= MAX_MEMORY_FACTS) throw Error('长期记忆已满，请先删除不需要的信息。');
+        const canonical = canonicalMemoryKey(text, kind);
+        const collision = canonical ? state.facts.find((item) => factMemoryKey(item) === canonical) : undefined;
+        if (!previous && !collision && state.facts.length >= MAX_MEMORY_FACTS)
+          throw Error('长期记忆已满，请先删除不需要的信息。');
+        const factId = previous?.id ?? collision?.id ?? randomUUID();
         const fact = {
-          id: id ?? randomUUID(),
+          id: factId,
           kind,
           text,
           tags: [],
           salience: 5,
           source: 'manual' as const,
           ts: now(),
-          key: previous?.key ?? 'manual:' + randomUUID(),
+          key: canonical ?? 'manual:' + factId,
         };
-        if (previous) state.facts[state.facts.indexOf(previous)] = fact;
-        else state.facts.push(fact);
+        state.facts = state.facts.filter(
+          (item) => item.id !== factId && (!canonical || factMemoryKey(item) !== canonical),
+        );
+        state.facts.push(fact);
       });
     },
   };

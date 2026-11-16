@@ -27,6 +27,7 @@ export function createAssistantTranscript() {
     emitted = '',
     deltas = '',
     outputs = '',
+    unscoped = '',
     done = true;
   const items = new Set<string>(),
     events = new Set<string>(),
@@ -46,6 +47,7 @@ export function createAssistantTranscript() {
         emitted = '';
         deltas = '';
         outputs = '';
+        unscoped = '';
         done = false;
         items.clear();
         events.clear();
@@ -59,7 +61,7 @@ export function createAssistantTranscript() {
       }
       if (event.type === 'turn.done' && turn.role === 'assistant' && turn.id === id) {
         done = true;
-        return { done: true, full: transcriptText(turn.transcript) || emitted };
+        return { done: true, full: transcriptText(turn.transcript) || emitted || unscoped };
       }
       let candidate = '';
       if (event.type === 'turn.delta') {
@@ -74,6 +76,11 @@ export function createAssistantTranscript() {
           if (items.has(item.id)) return {};
           if (items.size >= 1024) return {};
           items.add(item.id);
+        }
+        // 缺少轮编号的片段可能来自被打断的上一轮，不得抢在当前增量前进入字幕或朗读。
+        if (owner === undefined) {
+          unscoped = (unscoped + transcriptText(item.text)).slice(0, 6000);
+          return {};
         }
         outputs = (outputs + transcriptText(item.text)).slice(0, 6000);
         candidate = outputs;

@@ -66,6 +66,70 @@ test('否定和改称呼替换旧事实，禁食信息不被喜欢覆盖', () =>
     f.clean();
   }
 });
+test('手动把咖啡改成茶后，新的咖啡纠正不能覆盖茶；手动与自动同主题合并', () => {
+  const f = fixture();
+  try {
+    f.memory.remember('main', '我喜欢咖啡', 'text');
+    const id = f.memory.view('main').facts[0].id;
+    f.memory.save('main', '用户喜欢茶', 'preference', id);
+    f.memory.remember('main', '我不喜欢咖啡', 'workbuddy-voice');
+    let rows = f.memory.view('main').facts;
+    assert.ok(rows.some((row) => row.id === id && row.text === '用户喜欢茶'));
+    assert.ok(rows.some((row) => row.text === '用户不喜欢咖啡'));
+    f.memory.save('main', '用户喜欢喝咖啡', 'preference');
+    rows = f.memory.view('main').facts;
+    assert.equal(rows.filter((row) => row.text.includes('咖啡')).length, 1);
+    assert.ok(rows.some((row) => row.text === '用户喜欢喝咖啡'));
+  } finally {
+    f.clean();
+  }
+});
+test('手动新增称呼替换同一用户旧称呼，重新开应用后也不混用', () => {
+  const f = fixture();
+  try {
+    f.memory.remember('main', '我叫小星', 'text');
+    f.memory.save('main', '用户希望被称为「星宝」', 'profile');
+    const next = f.make();
+    assert.equal(next.view('main').facts.filter((row) => row.text.includes('被称为')).length, 1);
+    assert.doesNotMatch(next.context('main'), /小星/u);
+    assert.match(next.context('main'), /星宝/u);
+  } finally {
+    f.clean();
+  }
+});
+test('兼容 .19 已编辑正文但保留旧主题键的文件，纠正时保留另一主题', () => {
+  const f = fixture();
+  try {
+    f.memory.save('main', '用户喜欢茶', 'preference');
+    const directory = f.memory.view('main').directory,
+      path = join(directory, readdirSync(directory)[0]);
+    const previous = JSON.parse(readFileSync(path, 'utf8'));
+    previous.facts[0].key = 'preference:like:咖啡';
+    writeFileSync(path, JSON.stringify(previous));
+    const next = f.make();
+    next.remember('main', '我不喜欢咖啡', 'text');
+    const rows = next.view('main').facts;
+    assert.ok(rows.some((row) => row.text === '用户喜欢茶'));
+    assert.ok(rows.some((row) => row.text === '用户不喜欢咖啡'));
+  } finally {
+    f.clean();
+  }
+});
+test('常见昵称和约好表达能够记住，爱人和爱好不能被截成错误喜好', () => {
+  assert.ok(memoryCandidates('我的昵称叫星宝').some((row) => row.key === 'name' && row.text.includes('星宝')));
+  assert.ok(memoryCandidates('以后你就叫我星宝吧').some((row) => row.key === 'name' && row.text.includes('星宝')));
+  assert.ok(
+    memoryCandidates('我们约好了周末去爬山').some((row) => row.kind === 'promise' && row.text.includes('爬山')),
+  );
+  assert.equal(
+    memoryCandidates('我爱人叫小光').some((row) => row.text.includes('喜欢人叫')),
+    false,
+  );
+  assert.equal(
+    memoryCandidates('我爱好画画').some((row) => row.text.includes('喜欢好画画')),
+    false,
+  );
+});
 test('提取只处理明确的用户陈述，问题、引用、秘密、指令及不记要求不写入', () => {
   for (const text of [
     '我喜欢什么？',

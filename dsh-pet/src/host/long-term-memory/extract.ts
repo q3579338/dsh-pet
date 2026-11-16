@@ -43,7 +43,9 @@ export function memoryCandidates(input: string): MemoryCandidate[] {
         '',
       )
       .trim();
-    const name = clause.match(/^(?:叫我|我叫|我的名字(?:是|叫))([\p{L}\p{N}_· -]{1,24})$/u);
+    const name = clause.match(
+      /^(?:你(?:就)?(?:叫我|喊我)|叫我|喊我|我叫|我的(?:名字|昵称)(?:是|叫))([\p{L}\p{N}_· -]{1,24})$/u,
+    );
     if (name) {
       const value = trimTail(name[1]);
       if (
@@ -54,6 +56,14 @@ export function memoryCandidates(input: string): MemoryCandidate[] {
         put('profile', `用户希望被称为「${value}」`, 'name', 5);
       continue;
     }
+    const agreement = clause.match(/^我们(?:说好|约好|约定)了?(.{2,60})$/u);
+    if (agreement) {
+      put('promise', '约定：' + clause, 'promise:' + agreement[1].trim(), 5);
+      continue;
+    }
+    const hobby = clause.match(/^我的?爱好(?:是|为)?(.{1,40})$/u);
+    if (hobby) clause = '我喜欢' + hobby[1];
+    if (/^我爱(?:人|的|情)/u.test(clause)) continue;
     const preference = clause.match(
       /^我(?:现在|以后|已经|很|超|最|特别|挺|蛮)?(不再喜欢|不喜欢|讨厌|喜欢|爱|不吃|不能吃|吃不了|不喝|喝不了)(.{1,40})$/u,
     );
