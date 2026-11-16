@@ -1,7 +1,6 @@
 /** dsh-pet-memory 的独立版接线：本机提取、有限召回和可管理的事实。 */
 import { randomUUID } from 'node:crypto';
 import { recall, neutralize } from '../../vendor/dsh-pet-memory/recall.mjs';
-import { isNearDuplicate } from '../../vendor/dsh-pet-memory/extract.mjs';
 import type { ChatMemoryProvider } from '../chat-memory-provider.ts';
 import { createLongTermMemoryStore, MAX_MEMORY_FACTS } from './store.ts';
 import { memoryCandidates, safeMemoryText } from './extract.ts';
@@ -41,15 +40,6 @@ export function createLongTermMemory(
         const matches = state.facts.filter((item) => factMemoryKey(item) === candidate.key);
         const previous = matches.sort((a, b) => b.ts - a.ts)[0];
         if (previous?.text === candidate.text && matches.length === 1 && previous.key === candidate.key) continue;
-        if (
-          !previous &&
-          isNearDuplicate(
-            candidate.text,
-            state.facts.filter((item) => item.kind === candidate.kind).map((item) => item.text),
-            0.92,
-          )
-        )
-          continue;
         if (!previous && state.facts.length >= MAX_MEMORY_FACTS) continue;
         const fact = { ...candidate, id: previous?.id ?? randomUUID(), source, ts: now() };
         state.facts = state.facts.filter((item) => factMemoryKey(item) !== candidate.key);
@@ -103,8 +93,10 @@ export function createLongTermMemory(
   const provider: ChatMemoryProvider = {
     id: 'dsh-pet-memory/local',
     recall(input) {
+      const key = input.petId + '\0' + input.userText;
+      tickets.delete(key);
       try {
-        tickets.set(input.petId + '\0' + input.userText, store.read(input.petId).revision);
+        tickets.set(key, store.read(input.petId).revision);
         if (tickets.size > 128) tickets.delete(tickets.keys().next().value!);
       } catch {
         /* context 会记录固定的可示人错误，不输出事实正文。 */
@@ -116,6 +108,8 @@ export function createLongTermMemory(
       const key = input.petId + '\0' + input.userText,
         revision = tickets.get(key);
       tickets.delete(key);
+      // 被淘汰或读取失败的请求没有可验证的版本，不能绕过清空/关闭后的保护。
+      if (revision === undefined) return;
       remember(input.petId, input.userText, 'text', revision);
     },
   };

@@ -28,6 +28,32 @@ function fixture() {
   };
 }
 
+test('超过在途上限后，清空前的迟到回复不能重新写回已清除的记忆', async () => {
+  const f = fixture();
+  try {
+    const first = { petId: 'main', system: '人设', history: [], userText: '我喜欢咖啡' };
+    await f.memory.provider.recall?.(first);
+    for (let i = 0; i < 130; i++) await f.memory.provider.recall?.({ ...first, userText: '普通问题' + i });
+    f.memory.clear('main');
+    await f.memory.provider.capture?.({ ...first, replyText: '好的', ts: 1 });
+    assert.equal(f.memory.view('main').facts.length, 0);
+  } finally {
+    f.clean();
+  }
+});
+test('名称相似但不同的两个喜好不能被模糊去重吞掉', () => {
+  const f = fixture();
+  try {
+    f.memory.remember('main', '我喜欢ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A', 'text');
+    f.memory.remember('main', '我喜欢ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789B', 'text');
+    assert.equal(f.memory.view('main').facts.length, 2);
+    f.memory.remember('main', '我喜欢ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789A', 'text');
+    assert.equal(f.memory.view('main').facts.length, 2, '真正的重复仍只保存一次');
+  } finally {
+    f.clean();
+  }
+});
+
 test('中文称呼、喜好、约定可跨重启和模型来源召回，各宠物隔离', () => {
   const f = fixture();
   try {
