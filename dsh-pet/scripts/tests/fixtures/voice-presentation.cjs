@@ -66,6 +66,7 @@ module.exports = async ({
   fs.writeFileSync(path.join(run, 'voice-bubble-action-offscreen.png'), (await pet.webContents.capturePage()).toPNG());
   return {
     bubble: rendered.text,
+    playbackId: state.pets[petId].anim.data.playbackId,
     animation: receipt.name,
     playbackStatus: receipt.status,
     silentBubble: true,

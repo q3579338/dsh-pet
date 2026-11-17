@@ -9,10 +9,11 @@ const { app } = electron,
   RealWindow = electron.BrowserWindow;
 const run = process.env.FISH_TEST_RUN;
 const source = process.env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? 'codex' : 'workbuddy';
-const model = source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash';
+const model = process.env.DSH_PET_CONVERSATION_MODEL || (source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash');
 const label = source === 'codex' ? 'Codex' : 'WorkBuddy';
 const petId = process.env.DSH_PET_VOICE_TEST_PET_ID || 'main';
 const showcaseCases = process.env.DSH_PET_SHOWCASE_CASES ? JSON.parse(process.env.DSH_PET_SHOWCASE_CASES) : [];
+const showcaseRepeats = process.env.DSH_PET_SHOWCASE_REPEATS === '2' ? 2 : 1;
 const report = { source, offscreen: true, shown: false, nativeCalls: 0 };
 report.codexDictationCalls = 0;
 report.codexChildren = 0;
@@ -68,7 +69,7 @@ const guard = setTimeout(
     fs.writeFileSync(path.join(run, 'result.json'), JSON.stringify({ ...report, error: 'deadline' }, null, 2));
     app.exit(1);
   },
-  showcaseCases.length ? 240000 : 180000,
+  showcaseRepeats > 1 ? 420000 : showcaseCases.length ? 240000 : 180000,
 );
 (async () => {
   let js;
@@ -163,13 +164,13 @@ const guard = setTimeout(
       await wait(100);
     }
     await js(`(async()=>{
-      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false,turn:0,turns:[],audioRewinds:0,audioSeen:new WeakSet()};
+      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false,turn:0,turns:[],audioRewinds:0,audioOverlaps:0,audioStalls:[],audioSeen:new WeakSet()};
       const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'保留这条草稿');input.dispatchEvent(new Event('input',{bubbles:true}));
       document.addEventListener('pet-custom-voice-play',event=>__wb.metrics.push({...event.detail,realSpeechEndMs:performance.now()-__wb.endAt,at:performance.now()}));
       document.addEventListener('pet-voice-model',event=>__wb.models.push(event.detail.model));
       document.addEventListener('pet-voice-recognized',event=>__wb.recognized.push({...event.detail,fromSpeechEndMs:performance.now()-__wb.endAt}));
       const nativePeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(nativePeer,{construct(target,args){__wb.peers++;return new target(...args)}});
-      const nativePlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;if(this.dataset.petCustomVoice){__wb.audios.push(this);if(!__wb.audioSeen.has(this)){__wb.audioSeen.add(this);let last=0;this.addEventListener('timeupdate',()=>{if(!this.isConnected)return;if(this.currentTime+.15<last)__wb.audioRewinds++;last=this.currentTime});}}return nativePlay.call(this)};
+      const nativePlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;if(this.dataset.petCustomVoice){__wb.audios.push(this);if(!__wb.audioSeen.has(this)){__wb.audioSeen.add(this);let last=0;this.addEventListener('timeupdate',()=>{if(!this.isConnected)return;if(this.currentTime+.15<last)__wb.audioRewinds++;last=this.currentTime});this.addEventListener('playing',()=>{if(__wb.audios.some(other=>other!==this&&other.isConnected&&!other.paused&&!other.ended&&other.currentTime>0))__wb.audioOverlaps++});this.addEventListener('waiting',()=>{if(this.isConnected&&this.currentTime>.05&&!this.ended)__wb.audioStalls.push({turn:__wb.turn,time:this.currentTime})});}}return nativePlay.call(this)};
       const nativeFetch=window.fetch;window.fetch=async(url,init)=>{
         if(String(url).includes('/voice/conversation/events?')){
           const response=await nativeFetch(url,init);
@@ -179,7 +180,7 @@ const guard = setTimeout(
 
         if(/\\/voice\\/(speak|stream)$/.test(String(url))){
           const body=JSON.parse(init.body);if(__wb.failOnce){__wb.turns.at(-1).failed=true;__wb.failOnce=false;__wb.failedAt=performance.now();return new Response(JSON.stringify({ok:false,message:'test temporary synthesis failure'}),{headers:{'content-type':'application/json'}})}
-          const began=performance.now(),turn=__wb.turn;const response=await nativeFetch(url,init);const row={turn,text:body.text,voice:body.voice,chars:body.text.length,headersMs:performance.now()-began,type:response.headers.get('content-type')};__wb.voiceRequests.push(row);
+          const began=performance.now(),turn=__wb.turn;const row={request:__wb.voiceRequests.length+1,turn,text:body.text,voice:body.voice,chars:body.text.length,requestedAt:began};__wb.voiceRequests.push(row);let response;try{response=await nativeFetch(url,init)}catch(error){row.failed=true;row.aborted=init.signal?.aborted===true;throw error}row.headersMs=performance.now()-began;row.type=response.headers.get('content-type');
           void response.clone().arrayBuffer().then(bytes=>{row.bytes=bytes.byteLength;row.ready=true;row.aborted=init.signal?.aborted===true;if(row.type?.includes('audio')&&!__wb.samples[body.voice]){let str='';for(const v of new Uint8Array(bytes))str+=String.fromCharCode(v);__wb.samples[body.voice]=btoa(str)}}).catch(()=>{row.failed=true;row.aborted=init.signal?.aborted===true;});return response;
         }return nativeFetch(url,init);
       };
@@ -194,7 +195,8 @@ const guard = setTimeout(
       navigator.mediaDevices.getUserMedia=async()=>{window.__wbDestination=__wbContext.createMediaStreamDestination();const stream=__wbDestination.stream;__wb.tracks.push(...stream.getTracks());return stream};
       window.__wbSpeak=async(index=0)=>{await __wbContext.resume();const source=__wbContext.createBufferSource();source.buffer=__wbSamples[index];source.connect(__wbDestination);await new Promise(done=>{source.onended=()=>{__wb.endAt=performance.now();source.disconnect();done()};source.start()})};
     })()`);
-    const until = async (expression, label, limit = 200) => {
+    // 与上面隔离配置的60秒模型超时对齐；等待上限不代表响应速度达标。
+    const until = async (expression, label, limit = 650) => {
       for (let i = 0; i < limit; i++) {
         if (await js(expression)) return;
         await wait(100);
@@ -203,6 +205,7 @@ const guard = setTimeout(
     };
     report.actualSpeechTextMatches = [];
     report.showcases = [];
+    let previousShowcase;
     const checkShowcase = async (tone, index, hold = true) => {
       const item = showcaseCases[index];
       const result = await require('./voice-presentation.cjs')({
@@ -215,6 +218,12 @@ const guard = setTimeout(
         hold,
         speechCount: () => js('__wb.voiceRequests.length'),
       });
+      if (previousShowcase) {
+        assert.notEqual(result.playbackId, previousShowcase, 'Each new voice command must create its own playback');
+        const old = await (await fetch(origin + '/dsh-pet-7340/playback/' + previousShowcase, { headers })).json();
+        assert.ok(['cancelled', 'ended'].includes(old.status), 'Previous voice action must stop after switching');
+      }
+      previousShowcase = result.playbackId;
       if (item) report.showcases.push({ ...result, tone });
       return result;
     };
@@ -230,7 +239,17 @@ const guard = setTimeout(
         }
         await wait(100);
       }
-      throw new Error('Complete WorkBuddy reply did not match actual synthesis text');
+      throw new Error('Complete reply did not match synthesis text');
+    };
+    const waitPlayedSpeech = async () => {
+      if (process.env.DSH_PET_SPEECH_PROBE !== '1') return;
+      const match = report.actualSpeechTextMatches.at(-1);
+      await until(
+        "document.querySelector('.pet-chat-live-status')?.textContent.includes('可以直接说话')&&__wb.audios.length>0&&__wb.audios.every(audio=>audio.paused||audio.ended)",
+        'Full audio playback and queue idle',
+        250,
+      );
+      match.playbackEnded = true;
     };
     const start = async (tone) => {
       await js(
@@ -278,6 +297,7 @@ const guard = setTimeout(
     await until('__wb.metrics.length>=2', 'second continuous reply');
     await waitFullSpeech();
     if (showcaseCases.length) await checkShowcase('starbell', 1);
+    await waitPlayedSpeech();
     await wait(1000);
     await js('__wb.failOnce=true');
     await js('__wbSpeak()');
@@ -293,11 +313,23 @@ const guard = setTimeout(
     await until('__wb.metrics.length>=3', 'reply after failed voice');
     await waitFullSpeech();
     if (showcaseCases.length) await checkShowcase('starbell', 0);
+    await waitPlayedSpeech();
+    if (showcaseCases.length && showcaseRepeats > 1) {
+      for (const index of [1, 0, 1]) {
+        const before = await js('__wb.metrics.length');
+        await js('__wbSpeak(' + index + ')');
+        await until('__wb.metrics.length>' + before, 'Starbell continued showcase playback');
+        await waitFullSpeech();
+        await checkShowcase('starbell', index);
+        await waitPlayedSpeech();
+      }
+    }
     await until("!!__wb.samples['bigfish-cute/starbell-v1']", 'complete Starbell sample');
     await stop();
     for (const tone of ['sugarbud', 'dango']) {
       await start(tone);
-      for (let index = 0; index < Math.max(1, showcaseCases.length); index++) {
+      for (let at = 0; at < Math.max(1, showcaseCases.length) * showcaseRepeats; at++) {
+        const index = at % Math.max(1, showcaseCases.length);
         const before = await js('__wb.metrics.length');
         await js('__wbSpeak(' + index + ')');
         await until('__wb.metrics.length>' + before, tone + ' new actual playback');
@@ -307,16 +339,18 @@ const guard = setTimeout(
         if (showcaseCases.length) {
           await checkShowcase(tone, index);
         }
+        await waitPlayedSpeech();
       }
       await stop();
     }
     if (process.env.DSH_PET_SPEECH_PROBE === '1') assert.ok(report.actualSpeechTextMatches.length >= 3);
     report.live = await js(
-      `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled,audioRewinds:__wb.audioRewinds})`,
+      `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled,audioRewinds:__wb.audioRewinds,audioOverlaps:__wb.audioOverlaps,audioStalls:__wb.audioStalls})`,
     );
     assert.equal(report.nativeCalls, 0);
     assert.equal(report.codexDictationCalls, source === 'codex' ? samples.length : 0);
     assert.equal(report.live.audioRewinds, 0, 'Audio playback must not jump back and repeat');
+    assert.equal(report.live.audioOverlaps, 0, 'Custom voice segments must not overlap');
     if (source === 'workbuddy') assert.equal(report.codexChildren, 0);
     else assert.ok(report.codexChildren > 0);
     if (source === 'workbuddy') assert.ok(report.workbuddyAsrChildren >= 6);
@@ -413,7 +447,7 @@ const guard = setTimeout(
     report.error = String(error?.stack ?? error?.message ?? error);
     if (js)
       report.status = await js(
-        "({status:document.querySelector('.pet-chat-live-status')?.textContent,live:window.__wb?{metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests}:null})",
+        "({status:document.querySelector('.pet-chat-live-status')?.textContent,live:window.__wb?{metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,turns:__wb.turns,audioRewinds:__wb.audioRewinds,audioOverlaps:__wb.audioOverlaps,audioStalls:__wb.audioStalls}:null})",
       ).catch(() => null);
     report.ok = false;
   } finally {

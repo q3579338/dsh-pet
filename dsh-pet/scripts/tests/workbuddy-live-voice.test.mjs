@@ -78,7 +78,7 @@ test(
             child.kill();
             reject(Error('WorkBuddy语音后台验收超时'));
           },
-          process.env.DSH_PET_SHOWCASE_CASES ? 250000 : 190000,
+          process.env.DSH_PET_SHOWCASE_REPEATS === '2' ? 430000 : process.env.DSH_PET_SHOWCASE_CASES ? 250000 : 190000,
         );
         child.once('error', (error) => {
           clearTimeout(timer);
@@ -109,9 +109,18 @@ test(
         env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? Math.max(1, cases.length) : 0,
       );
       if (cases.length) {
-        assert.ok(report.actualSpeechTextMatches.length >= 6);
-        assert.ok(new Set(report.actualSpeechTextMatches.map((row) => row.turn)).size >= 6);
-        assert.ok(report.live.recognized.length >= 8);
+        const complete = env.DSH_PET_SHOWCASE_REPEATS === '2' ? 13 : 6;
+        assert.ok(report.actualSpeechTextMatches.length >= complete);
+        assert.ok(report.actualSpeechTextMatches.every((row) => row.playbackEnded));
+        assert.ok(new Set(report.actualSpeechTextMatches.map((row) => row.turn)).size >= complete);
+        assert.ok(report.live.recognized.length >= complete + 2);
+        if (env.DSH_PET_SHOWCASE_REPEATS === '2') {
+          for (const tone of ['sugarbud', 'dango'])
+            assert.deepEqual(
+              report.showcases.filter((row) => row.tone === tone).map((row) => row.animation),
+              [...cases, ...cases].map((item) => item.action),
+            );
+        }
         for (const tone of ['starbell', 'sugarbud', 'dango'])
           for (const item of cases)
             assert.ok(

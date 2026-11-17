@@ -185,6 +185,44 @@ test('首句在整轮结束前播放；最多预取两段，并按原顺序完�
   queue.dispose();
 });
 
+test('后段缓存先返回时仍等待首段，严格按台词顺序各播放一次', async () => {
+  const requested: string[] = [],
+    played: string[] = [],
+    completed: string[] = [];
+  let releaseFirst!: () => void;
+  const queue = createCustomSpeechQueue({
+    failure: () => assert.fail('Unexpected failure'),
+    sink: {
+      synthesize: async (text) => {
+        requested.push(text);
+        if (requested.length === 1) await new Promise<void>((done) => (releaseFirst = done));
+        completed.push(text);
+        return new Blob([text]);
+      },
+      play: async (audio) => {
+        played.push(await audio.text());
+      },
+    },
+  });
+  try {
+    queue.begin();
+    queue.append('这就展示给你看，记忆测试星！');
+    queue.append('天圆地方，亮相～');
+    queue.finish();
+    await tick();
+    assert.equal(requested.length, 2);
+    assert.deepEqual(completed, [requested[1]]);
+    assert.deepEqual(played, []);
+    releaseFirst();
+    for (let i = 0; i < 5 && queue.busy(); i++) await tick();
+    assert.deepEqual(completed, [requested[1], requested[0]]);
+    assert.deepEqual(played, requested);
+    assert.equal(played.join(''), '这就展示给你看，记忆测试星！天圆地方，亮相～');
+  } finally {
+    queue.dispose();
+  }
+});
+
 test('首批文字很短时只等待一次截止时间，后续凑够正文立即合成，最终正文完整且不重读', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const requested: string[] = [];

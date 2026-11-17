@@ -195,7 +195,7 @@ const guard = setTimeout(() => {
           headers: { ...headers, 'content-type': 'application/json' },
           body: JSON.stringify({
             protocol: source,
-            model: source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash',
+            model: process.env.DSH_PET_CONVERSATION_MODEL || (source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash'),
             timeoutMs: 60000,
           }),
         });
@@ -204,10 +204,13 @@ const guard = setTimeout(() => {
         await js("document.querySelector('[data-tab=chat]').click()");
         report.chatActions = [];
         let previousPlayback;
-        for (const [text, action] of [
+        const showcaseCases = [
           ['展示天圆地方', '展示天圆地方'],
           ['拿出一颗非洲之心给我看看', '展示非洲之心'],
-        ]) {
+        ];
+        const sequence =
+          process.env.DSH_PET_SHOWCASE_REPEATS === '2' ? [...showcaseCases, ...showcaseCases] : showcaseCases;
+        for (const [text, action] of sequence) {
           await js(
             `(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(text)});input.dispatchEvent(new Event('input',{bubbles:true}))})()`,
           );
@@ -284,7 +287,13 @@ const guard = setTimeout(() => {
             fs.writeFileSync(path.join(run, 'body-' + action + '.png'), (await pet.webContents.capturePage()).toPNG());
           }
           await until("!document.querySelector('.pet-chat-send').classList.contains('is-busy')", 'chat finished');
-          report.chatActions.push({ source, pet: 'maixiaowen', action, playback: receipt.status });
+          report.chatActions.push({
+            source,
+            pet: 'maixiaowen',
+            action,
+            playback: receipt.status,
+            playbackId: receipt.playbackId,
+          });
         }
         fs.writeFileSync(path.join(run, 'pet-target-chat.png'), (await chat.webContents.capturePage()).toPNG());
         if (previousPlayback) {
