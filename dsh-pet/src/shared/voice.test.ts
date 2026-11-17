@@ -212,7 +212,8 @@ describe('playSayVoice —— 这一句该不该念', () => {
 
   test('网页端页面不可见 → 不发请求（桌面端不看可见性）', async () => {
     const fetchStub = stubFetch();
-    const browser = stubBrowser();
+    const volumes: number[] = [];
+    const browser = stubBrowser({ volumes });
     const previousDocument = (globalThis as { document?: unknown }).document;
     (globalThis as { document?: unknown }).document = { hidden: true };
     try {
@@ -227,6 +228,7 @@ describe('playSayVoice —— 这一句该不该念', () => {
       playSayVoice({ text: '桌面端照念', voiceTo: 'desktop' });
       await flush();
       assert.deepEqual(fetchStub.calls, [{ text: '桌面端照念' }]);
+      assert.deepEqual(volumes, [1], '桌面宠物被遮挡时也必须实际播放，不能只合成后静音丢弃');
     } finally {
       (globalThis as { document?: unknown }).document = previousDocument;
       browser.restore();

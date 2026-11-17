@@ -218,7 +218,7 @@ export function playSayVoice(say: { readonly text: string; readonly voiceTo?: Vo
     setVoiceState('idle');
     return;
   }
-  void speakWhenReady(say.text); // 不 await：播放是旁路，不能挡住气泡与动画
+  void speakWhenReady(say.text, surface === 'desktop'); // 桌宠窗口被遮挡不等于网页标签页切后台。
 }
 
 /**
@@ -331,6 +331,8 @@ if (typeof document !== 'undefined' && typeof document.addEventListener === 'fun
 async function speak(text: string, canPlayHidden = false): Promise<void> {
   const token = ++autoSeq;
   stopAutoAudio();
+  // 合成期间也保留本句的后台许可，避免窗口遮挡事件取消已发出的桌宠请求。
+  autoAudioCanPlayHidden = canPlayHidden;
   const controller = new AbortController();
   autoController = controller;
   autoSpeaking = token;
