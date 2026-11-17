@@ -45,4 +45,10 @@ test('模型保存只清除模型改动，不吞掉尚未保存的宠物设置',
   assert.equal(api.state.dirty, true, '连接或桌宠保存不能吞掉长期记忆编辑草稿');
   api.markDirty(false, 'memory');
   assert.equal(api.state.dirty, false);
+  api.markDirty(true, 'selection');
+  api.markDirty(false, 'pets');
+  api.markDirty(false, 'ai');
+  assert.equal(api.state.dirty, true, '模型或桌宠保存不能吞掉未保存的宠物显示选择');
+  api.markDirty(false, 'selection');
+  assert.equal(api.state.dirty, false);
 });

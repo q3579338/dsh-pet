@@ -19,6 +19,7 @@ export const settingsPage = `<!doctype html>
 <div class="brand"><img class="brandLogo" src="/standalone-ai/icon.png" alt=""><span>桌宠</span></div>
 <nav class="nav" aria-label="设置分区"><div class="navList" role="tablist">
 <button type="button" class="navCell" role="tab" id="tab-chat" data-tab="chat" data-title="对话" aria-controls="panel-chat" aria-selected="true"><svg class="navGlyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.4h10a1.1 1.1 0 0 1 1.1 1.1v5.6A1.1 1.1 0 0 1 13 11.2H8.2L5 13.6v-2.4H3a1.1 1.1 0 0 1-1.1-1.1V4.5A1.1 1.1 0 0 1 3 3.4Z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg><span class="navLabel">对话</span></button>
+<button type="button" class="navCell" role="tab" id="tab-pets" data-tab="pets" data-title="宠物" aria-controls="panel-pets" aria-selected="false"><span class="navGlyph" aria-hidden="true">♧</span><span class="navLabel">宠物</span></button>
 <button type="button" class="navCell" role="tab" id="tab-config" data-tab="config" data-title="配置" aria-controls="panel-config" aria-selected="false"><svg class="navGlyph" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M2.6 4.6h10.8M2.6 11.4h10.8"/><circle cx="6.2" cy="4.6" r="1.6" fill="currentColor" stroke="none"/><circle cx="9.8" cy="11.4" r="1.6" fill="currentColor" stroke="none"/></g></svg><span class="navLabel">配置</span></button>
 <button type="button" class="navCell" role="tab" id="tab-memory" data-tab="memory" data-title="长期记忆" aria-controls="panel-memory" aria-selected="false"><span class="navGlyph" aria-hidden="true">♡</span><span class="navLabel">记忆</span></button>
 </div></nav>
@@ -53,6 +54,9 @@ export const settingsPage = `<!doctype html>
 <section class="panel" id="panel-chat" role="tabpanel" aria-labelledby="tab-chat">
 <div class="pet-chat-host" id="pet-chat-root"></div>
 </section>
+<section class="panel" id="panel-pets" role="tabpanel" aria-labelledby="tab-pets" hidden><div class="scroll">
+<div id="pet-selection"><p class="empty">正在读取宠物选择…</p></div>
+</div></section>
 <section class="panel" id="panel-memory" role="tabpanel" aria-labelledby="tab-memory" hidden><div class="scroll">
 <div class="card"><div class="cardHead"><h2 class="cardTitle">长期记忆 · 本机</h2><button class="btn" id="memory-refresh" type="button">刷新</button></div>
 <p class="cardHint">自动整理你明确说过的称呼、喜好和约定。规则提取可能有遗漏，可在下方纠正。每只桌宠单独保存，Codex 与 WorkBuddy 共用同一只桌宠的记忆。</p>

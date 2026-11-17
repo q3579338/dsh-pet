@@ -91,8 +91,8 @@ function setStatus(node, text, kind) {
 }
 
 function markDirty(value, scope = 'pets') {
-  state[scope === 'ai' ? 'dirtyAi' : scope === 'memory' ? 'dirtyMemory' : 'dirtyPets'] = value;
-  state.dirty = state.dirtyAi || state.dirtyPets || state.dirtyMemory;
+  state[scope === 'ai' ? 'dirtyAi' : scope === 'memory' ? 'dirtyMemory' : scope === 'selection' ? 'dirtySelection' : 'dirtyPets'] = value;
+  state.dirty = state.dirtyAi || state.dirtyPets || state.dirtyMemory || !!state.dirtySelection;
   const badge = byId('dirty');
   if (badge) badge.hidden = !state.dirty;
 }

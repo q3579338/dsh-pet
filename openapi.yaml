@@ -2145,6 +2145,49 @@ paths:
         "405":
           $ref: "#/components/responses/MethodNotAllowed"
 
+  /dsh-pet-7340/pet-selection:
+    post:
+      tags: [Config]
+      operationId: savePetSelection
+      summary: 保存桌面单宠或多宠选择
+      description: 按实例 id 选择桌面宠物。单宠恰好一只，多宠至少一只；保留各实例、浏览器显示与记忆。配置写失败时尝试恢复原始文件；成功后异步重载桌面。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, ids]
+              properties:
+                mode:
+                  type: string
+                  enum: [single, multiple]
+                ids:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: 成功返回成品配置；失败返回 bad-request、unknown-pet、user-config-unparsable 或 generate-error。
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties:
+                      $ref: "#/components/schemas/PetConfigEntry"
+                  - $ref: "#/components/schemas/FailureResponse"
+        "400":
+          description: 请求体不是合法 JSON。
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FailureResponse"
+        "405":
+          $ref: "#/components/responses/MethodNotAllowed"
+
   /dsh-pet-7340/pet-display:
     post:
       tags: [Config]

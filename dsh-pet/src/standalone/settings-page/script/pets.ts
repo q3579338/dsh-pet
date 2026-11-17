@@ -75,6 +75,8 @@ function initDrafts(config) {
   }
   if (!state.pets.main) state.pets.main = [];
   if (!state.pets[state.entry]) state.entry = 'main';
+  if (!state.dirtySelection) initPetSelection(config);
+  else renderPetSelection();
 }
 
 function currentPets() {

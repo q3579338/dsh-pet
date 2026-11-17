@@ -27,10 +27,12 @@ function petBar() {
 function addPet() {
   const list = currentPets();
   let index = list.length + 1;
-  let id = (state.entry === 'main' ? 'pet-' : '') + index;
-  while (list.some((pet) => pet.id === id)) {
+  const prefix = state.entry === 'main' ? 'pet-' : state.entry + '-';
+  const usedIds = new Set(Object.values(state.pets).flat().map(pet => pet.id));
+  let id = prefix + index;
+  while (usedIds.has(id)) {
     index += 1;
-    id = (state.entry === 'main' ? 'pet-' : '') + index;
+    id = prefix + index;
   }
   list.push({
     id: id,

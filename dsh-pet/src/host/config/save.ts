@@ -132,6 +132,8 @@ export function saveUserConfig(
   // 系统托盘开关（全局，仅桌面模式）：与上面几个全局布尔同语义——传了必须是布尔，没传走透传保留。
   const te = o.trayEnabled;
   if (te !== undefined && typeof te !== 'boolean') return null;
+  const desktopPetMode = o.desktopPetMode;
+  if (desktopPetMode !== undefined && desktopPetMode !== 'single' && desktopPetMode !== 'multiple') return null;
   // physics（拖拽抛掷手感，设置页「物理」区可图形化编辑）：整段校验——physicsValid 与读取侧
   // 是同一份规则（gravity/groundFriction ≥ 0、restitution ∈ [0,1]、throwPower > 0、两个布尔）。
   // 传了就按白名单写入；没传则走下面的透传保留（用户手改的值原样不动）。
@@ -175,6 +177,7 @@ export function saveUserConfig(
   // 白名单可编辑字段：pets 来自请求体，其余（四个全局开关 / physics / 两个模型 /
   // 对话历史条数）同样只在请求体真的传了时才写（未传则走下面的透传保留，不凭空造值）
   const outConfig: { pets: unknown[]; [key: string]: unknown } = { pets: out };
+  if (desktopPetMode !== undefined) outConfig.desktopPetMode = desktopPetMode;
   if (ne !== undefined) outConfig.notificationsEnabled = ne;
   if (nwf !== undefined) outConfig.notifyWhenFocused = nwf;
   if (cse !== undefined) outConfig.clickSoundEnabled = cse;
@@ -204,6 +207,7 @@ export function saveUserConfig(
   // 白名单字段只在「请求体传了」时才算白名单（已由上方写入）；未传时走这里透传磁盘旧值——
   // 否则整包调用的调用方漏传一个字段，就会把用户既有设置悄悄抹成默认。
   const bodyOwned = new Set(['pets']);
+  if (desktopPetMode !== undefined) bodyOwned.add('desktopPetMode');
   if (ne !== undefined) bodyOwned.add('notificationsEnabled');
   if (nwf !== undefined) bodyOwned.add('notifyWhenFocused');
   if (cse !== undefined) bodyOwned.add('clickSoundEnabled');

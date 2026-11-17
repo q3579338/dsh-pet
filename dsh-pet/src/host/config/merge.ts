@@ -57,6 +57,13 @@ export function mergeEntry(
     }
     out[key] = own;
   }
+  // 模式是用户主配置的可选偏好，不改原版素材配置，也不向文件角色继承。
+  if (
+    label === 'main-config.jsonc' &&
+    (overlay?.desktopPetMode === 'single' || overlay?.desktopPetMode === 'multiple')
+  ) {
+    out.desktopPetMode = overlay.desktopPetMode;
+  }
   return out;
 }
 
