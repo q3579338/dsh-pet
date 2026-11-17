@@ -5,6 +5,17 @@ import { createVoicePresentation, requestedVoiceAction } from './presentation.ts
 import { PollStateStore } from '../state.ts';
 import { PlaybackStore } from '../playback.ts';
 
+test('原声沿用文件宠物的展示动作白名单，支持拿出与展示，不误触发物品介绍或否定', () => {
+  const actions = ['展示非洲之心', '展示天圆地方', '放出闪光巡飞器'];
+  for (const text of ['拿出一颗非洲之心给我看', '把非洲之心掏出来', '给我看看非洲之心'])
+    assert.equal(requestedVoiceAction(text, actions), '展示非洲之心', text);
+  assert.equal(requestedVoiceAction('展示一下天圆地方', actions), '展示天圆地方');
+  assert.equal(requestedVoiceAction('放出一个闪光巡飞器', actions), '放出闪光巡飞器');
+  for (const text of ['别拿出非洲之心', '非洲之心是什么', '我拿出非洲之心给你看', '你有非洲之心吗'])
+    assert.equal(requestedVoiceAction(text, actions), undefined);
+  assert.equal(requestedVoiceAction('拿出非洲之心给我看', ['吃西瓜']), undefined);
+});
+
 test('连续语音与文字对话共享动作指令和解析，仅模型完成时表演一次', () => {
   const state = new PollStateStore(),
     playback = new PlaybackStore();

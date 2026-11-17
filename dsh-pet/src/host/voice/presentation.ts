@@ -27,7 +27,12 @@ export function requestedVoiceAction(text: string, names: readonly string[]): st
       .replace(/转(?:一个|个)/gu, '转')
       .replace(/伸(?:一个|个)/gu, '伸');
     for (const name of [...names].sort((a, b) => b.length - a.length)) {
-      for (const phrase of [name, ...(aliases[name] ?? [])]) {
+      // 文件宠物可新增展示动作；原声允许自然说“拿出一个…给我看”，仍只匹配当前角色白名单。
+      const object = /^(?:展示|拿出|放出)(.+)$/u.exec(name)?.[1];
+      const showObject = Boolean(
+        object && /(?:展示|拿出|掏出|拿出来|亮出|秀|给我看|看看|看一下|放出)/u.test(normalized),
+      );
+      for (const phrase of [name, ...(aliases[name] ?? []), ...(showObject && object ? [object] : [])]) {
         const at = normalized.indexOf(phrase);
         if (at < 0) continue;
         const before = normalized.slice(0, at),
@@ -35,12 +40,13 @@ export function requestedVoiceAction(text: string, names: readonly string[]): st
         if (
           /(?:别|不要|不能|不许|不想|不喜欢|不爱|停止|取消).{0,8}$/u.test(before.replace(/能不能/gu, '')) ||
           /(?:刚|刚刚|已经|正在|昨天|以前|曾经).{0,4}$/u.test(before) ||
-          /(?:我|他|她|它|我们)[^你请]{0,8}$/u.test(before) ||
+          /(?:我|他|她|它|我们)[^你请]{0,8}$/u.test(before.replace(/(?:给|帮)我/gu, '')) ||
           /(?:什么意思|是什么|这个词|这句话)/u.test(after)
         )
           continue;
         if (
           normalized.split(phrase).join('') === '' ||
+          (showObject && phrase === object) ||
           /(?:你|请|表演|给我|帮我|给.{0,4}看|来|能不能|可以)/u.test(before + after) ||
           (/(?:喜欢|爱)$/u.test(before) && /[吗么嘛呢]/u.test(after))
         )

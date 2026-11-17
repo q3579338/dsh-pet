@@ -12,7 +12,7 @@ import { firstSpeechPart } from '../../shared/speech-parts.ts';
 import { generateChat, type ChatMemoryMessage } from '../chat.ts';
 import { chatActionNames } from '../chat-action.ts';
 import { playChatAction } from '../chat-presentation.ts';
-import { currentEnvironment, type EnvironmentFacts } from '../environment.ts';
+import { promptEnvironment, type EnvironmentFacts } from '../environment.ts';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { composeSystemPrompt, petPersona } from '../persona.ts';
 import { findPetInstance, readAllConfig, removeRoundsByTs, sliceMemoryRounds } from '../config.ts';
@@ -268,7 +268,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
     const manualVoiceOn = cfg.main?.voiceEnabled === true;
     const voiceOff = kind === 'whisper' ? !whisperVoiceOn : !manualVoiceOn;
     const target = voiceOff ? undefined : (voiceTo ?? voiceTargetFor(found.pet));
-    const system = petSystemPrompt(found, { env: await currentEnvironment() });
+    const system = petSystemPrompt(found, { env: await promptEnvironment() });
     // 池只算一次：点名的图与随机抽图共用同一份（含文件存在性判定）。
     const pool = readMemePool(found.conf.memes, memeDirsFor(found.entry));
     // 点名了却没命中 = 配置写错或图已被删：明确失败，不静默换成另一张（点了 A 却看到 B 会以为坏了）。
@@ -317,7 +317,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
     const cfg = readAllConfig(configPaths);
     const found = findPetInstance(cfg, petId);
     if (!found) return false;
-    const system = petSystemPrompt(found, { env: await currentEnvironment() });
+    const system = petSystemPrompt(found, { env: await promptEnvironment() });
     const result = await generateWhisper(ctx, {
       system,
       preferred: configuredModel(found.conf, 'whisperModel'),
@@ -349,7 +349,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
     | { ok: false; reason: 'provider-missing' | 'generate-error' | 'unknown-pet'; message?: string }
   > => {
     // 环境（城市 + 天气）在锁外查：它是网络往返，压进 withMemoryLock 会把别的对话一起堵住
-    const env = await currentEnvironment();
+    const env = await promptEnvironment();
     return withMemoryLock(async () => {
       const cfg = readAllConfig(configPaths);
       const found = findPetInstance(cfg, petId);

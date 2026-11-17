@@ -88,11 +88,11 @@ export interface UapiEnvironment {
   readonly weather: WeatherSnapshot;
 }
 
-/** 最近一次成功结果（只有「自动定位」这一种键，进程内单条）。 */
-let cached: { readonly value: UapiEnvironment; readonly at: number } | null = null;
+/** 最近一次成功结果，按请求城市区分；空串表示自动定位。 */
+let cached: { readonly value: UapiEnvironment; readonly at: number; readonly city: string } | null = null;
 
 /** 进行中的请求；并发调用共享它，避免同时打两次上游。 */
-let inFlight: Promise<UapiEnvironment | null> | null = null;
+let inFlight: { city: string; promise: Promise<UapiEnvironment | null> } | null = null;
 
 /** 清空缓存与进行中的请求。 @internal 仅测试使用。 */
 export function resetUapiCache(): void {
@@ -122,17 +122,18 @@ export interface UapiDeps {
  */
 export async function fetchUapiWeather(deps: UapiDeps = {}): Promise<UapiEnvironment | null> {
   const now = deps.now ?? Date.now;
-  if (deps.force !== true && cached !== null && now() - cached.at < CACHE_TTL_MS) return cached.value;
-  if (inFlight !== null) return inFlight;
+  const city = (deps.city ?? '').trim();
+  if (deps.force !== true && cached?.city === city && now() - cached.at < CACHE_TTL_MS) return cached.value;
+  if (inFlight?.city === city) return inFlight.promise;
   const pending = requestUapi(deps)
     .then((value) => {
-      if (value !== null) cached = { value, at: now() };
+      if (value !== null && inFlight?.promise === pending) cached = { value, at: now(), city };
       return value;
     })
     .finally(() => {
-      inFlight = null;
+      if (inFlight?.promise === pending) inFlight = null;
     });
-  inFlight = pending;
+  inFlight = { city, promise: pending };
   return pending;
 }
 

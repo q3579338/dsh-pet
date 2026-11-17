@@ -26,6 +26,8 @@ export interface EnvironmentDeps {
 
 /** 配置里的天气城市读取口；宿主启动时注入一次，两条取数路径因此自动一致。 */
 let cityProvider: () => string | undefined = () => undefined;
+let promptCache:
+  { city: string; facts?: EnvironmentFacts; expires: number; pending?: Promise<EnvironmentFacts> } | undefined;
 
 /**
  * 注入「配置里的天气城市」读取口。
@@ -37,6 +39,7 @@ let cityProvider: () => string | undefined = () => undefined;
  */
 export function setCityProvider(provider: () => string | undefined): void {
   cityProvider = provider;
+  promptCache = undefined;
 }
 
 /** 环境事实：省市两段分开给，拼成一句话是消费方的事。 */
@@ -87,5 +90,35 @@ export async function currentEnvironment(deps: EnvironmentDeps = {}): Promise<En
   } catch {
     // 两条链路都自带兜底，走到这里只可能是意料外的事：宁可不写，也别让这一句对话挂掉
     return {};
+  }
+}
+
+/** 对话中的天气是补充信息：首次最多等200ms，慢查询在后台完成；同城复用在途与最近结果。 */
+export async function promptEnvironment(deps: EnvironmentDeps = {}): Promise<EnvironmentFacts> {
+  const city = (deps.city ?? cityProvider() ?? '').trim();
+  const now = deps.now ?? Date.now;
+  if (!promptCache || promptCache.city !== city || deps.force) promptCache = { city, expires: 0 };
+  const cached = promptCache;
+  if (cached.facts && cached.expires > now()) return cached.facts;
+  cached.pending ??= currentEnvironment({ ...deps, city })
+    .then((facts) => {
+      cached.facts = facts;
+      cached.expires = now() + 60000;
+      return facts;
+    })
+    .finally(() => {
+      cached.pending = undefined;
+    });
+  if (cached.facts) return cached.facts;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      cached.pending,
+      new Promise<EnvironmentFacts>((done) => {
+        timer = setTimeout(() => done({}), 200);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
