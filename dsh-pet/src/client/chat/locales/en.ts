@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const en: Record<Key, string> = {
   tabTitle: 'Pet chat',
   tabGuide: 'Chat with all desktop pets; click a tab to switch',
+  petNotDisplayed: ' (not on desktop)',
   loading: 'Loading…',
   emptyNoPet: 'No pets to chat with',
   emptyNoChat: 'No conversations yet',

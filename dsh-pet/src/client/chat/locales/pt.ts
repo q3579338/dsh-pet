@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const pt: Record<Key, string> = {
   tabTitle: 'Conversa dos bichinhos',
   tabGuide: 'Converse com todos os bichinhos de desktop; clique em uma aba para trocar',
+  petNotDisplayed: ' (não exibido na área de trabalho)',
   loading: 'Carregando…',
   emptyNoPet: 'Nenhum bichinho para conversar',
   emptyNoChat: 'Ainda não há conversas',

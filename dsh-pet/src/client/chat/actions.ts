@@ -16,6 +16,7 @@ import {
   type DeleteResult,
 } from './api.ts';
 import type { ConfirmKind, PanelData } from './types.ts';
+import { chooseChatPetId } from './pet-target.ts';
 
 /** 动作需要的最小端口。 */
 export interface ActionPorts {
@@ -27,6 +28,8 @@ export interface ActionPorts {
   readonly fail: (error: unknown) => void;
   /** 重新拉取某只宠物的历史。 */
   readonly reload: (petId: string) => Promise<void>;
+  /** 切换后又切回同一只时，旧操作也不能覆盖新一轮的草稿。 */
+  readonly isCurrent?: () => boolean;
 }
 
 /** 记忆动作：按轮删除与清空整只。 */
@@ -38,6 +41,7 @@ export function createHistoryActions(ports: ActionPorts): {
   const apply = async (run: () => Promise<DeleteResult>): Promise<void> => {
     try {
       const result = await run();
+      if (ports.isCurrent?.() === false) return;
       if (!result.ok) {
         ports.fail(result.message);
         return;
@@ -45,7 +49,7 @@ export function createHistoryActions(ports: ActionPorts): {
       ports.patch({ selected: [], error: '' });
       await ports.reload(ports.read().petId);
     } catch (error) {
-      ports.fail(error);
+      if (ports.isCurrent?.() !== false) ports.fail(error);
     }
   };
 
@@ -81,6 +85,7 @@ export function createSendActions(ports: ActionPorts): {
               ? undefined
               : { mediaType: data.attachment.mediaType, data: data.attachment.base64 };
           const result = await sendMessage(data.petId, text, attachment);
+          if (ports.isCurrent?.() === false || ports.read().petId !== data.petId) return;
           if (!result.ok) {
             ports.fail(result.message);
             return;
@@ -88,9 +93,9 @@ export function createSendActions(ports: ActionPorts): {
           ports.patch({ draft: '', attachment: undefined });
           await ports.reload(data.petId);
         } catch (error) {
-          ports.fail(error);
+          if (ports.isCurrent?.() !== false && ports.read().petId === data.petId) ports.fail(error);
         } finally {
-          ports.patch({ busy: false });
+          if (ports.isCurrent?.() !== false && ports.read().petId === data.petId) ports.patch({ busy: false });
         }
       })();
     },
@@ -109,6 +114,8 @@ export function createSendActions(ports: ActionPorts): {
 /** 外壳动作需要的额外句柄。 */
 export interface ShellDeps {
   readonly ports: ActionPorts;
+  /** 独立窗口按桌面可见角色回落，DSH 页面按网页可见角色回落。 */
+  readonly desktop?: boolean;
   /** 记忆删除动作（确认后要分发到它们）。 */
   readonly history: { deleteSelected: () => void; clearAll: () => void };
   /** 消息列表容器：展开更早的轮时要按高度差补偿滚动。 */
@@ -171,7 +178,7 @@ export function createShellActions(deps: ShellDeps): {
       try {
         const [config, orphans] = await Promise.all([fetchChatConfig(), fetchOrphans().catch(() => [])]);
         const { petId } = ports.read();
-        const nextPetId = config.pets.some((one) => one.id === petId) ? petId : (config.pets[0]?.id ?? '');
+        const nextPetId = chooseChatPetId(config.pets, petId, deps.desktop === true);
         ports.patch({
           pets: config.pets,
           roundsByEntry: config.roundsByEntry,

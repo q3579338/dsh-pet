@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const de: Record<Key, string> = {
   tabTitle: 'Maskottchen-Chat',
   tabGuide: 'Chatte mit allen Desktop-Maskottchen; klicke auf einen Tab zum Wechseln',
+  petNotDisplayed: ' (nicht auf dem Desktop)',
   loading: 'Wird geladen…',
   emptyNoPet: 'Keine Maskottchen zum Chatten',
   emptyNoChat: 'Noch keine Unterhaltung',

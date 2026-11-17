@@ -285,7 +285,7 @@ Object.assign(PetSprite.prototype, {
 
   showChatFromMenu(image, encoded) {
     if (!image && !encoded && typeof window.petBridge?.openChat === 'function') {
-      window.petBridge.openChat();
+      window.petBridge.openChat(this.pet.id);
       return;
     }
     if (this.chatMount) {
@@ -332,7 +332,7 @@ Object.assign(PetSprite.prototype, {
   // 识别结果落进输入框等用户确认（不自动发送）。
   startHearChat() {
     if (typeof window.petBridge?.openChat === 'function') {
-      window.petBridge.openChat();
+      window.petBridge.openChat(this.pet.id);
       return;
     }
     if (!this.chatMount) this.showChatFromMenu();

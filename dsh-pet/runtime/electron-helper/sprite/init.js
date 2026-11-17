@@ -221,7 +221,7 @@ Object.assign(PetSprite.prototype, {
         if (e.shiftKey || typeof window.petBridge?.openChat !== 'function') return;
         e.preventDefault();
         this.stopThrow();
-        window.petBridge.openChat();
+        window.petBridge.openChat(this.pet.id);
       },
       { signal: ac.signal },
     );

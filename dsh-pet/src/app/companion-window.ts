@@ -4,6 +4,7 @@
 export interface CompanionWindow {
   readonly webContents?: {
     on(event: 'will-prevent-unload', callback: (event: { preventDefault(): void }) => void): void;
+    executeJavaScript?(script: string): Promise<unknown>;
   };
   isDestroyed(): boolean;
   showInactive(): void;
@@ -18,7 +19,7 @@ export function createCompanionWindow(deps: {
   settingsUrl: string;
   log: (message: string) => void;
   confirmDiscard?: (window: CompanionWindow) => boolean;
-}): { open: (view?: 'chat' | 'config', activate?: boolean) => void } {
+}): { open: (view?: 'chat' | 'config', activate?: boolean, petId?: string) => void } {
   let window: CompanionWindow | undefined;
   let ready = false;
   let currentView = 'chat';
@@ -29,14 +30,35 @@ export function createCompanionWindow(deps: {
     if (focusWhenReady) window.focus();
   };
   return {
-    open(view = 'chat', activate = true) {
+    open(view = 'chat', activate = true, petId) {
       focusWhenReady = activate;
+      if (window && !window.isDestroyed() && ready && window.webContents?.executeJavaScript) {
+        const detail = JSON.stringify({ view, petId });
+        void window.webContents
+          .executeJavaScript(
+            'window.dispatchEvent(new CustomEvent("pet-open-view",{detail:' +
+              detail +
+              '}));' +
+              (petId ? 'window.dispatchEvent(new CustomEvent("pet-chat-target",{detail:' + detail + '}));' : ''),
+          )
+          .catch(() => deps.log('聊天窗口切换失败，请在顶部选择分区与宠物。'));
+        currentView = view;
+        reveal();
+        return;
+      }
       if (window && !window.isDestroyed() && currentView === view) {
+        if (petId)
+          void window.webContents
+            ?.executeJavaScript?.(
+              'window.dispatchEvent(new CustomEvent("pet-chat-target",{detail:{petId:' + JSON.stringify(petId) + '}}))',
+            )
+            .catch(() => deps.log('聊天对象切换失败，请在对话顶部选择宠物。'));
         reveal();
         return;
       }
       const address = new URL(deps.settingsUrl);
       address.searchParams.set('view', view);
+      if (petId) address.searchParams.set('pet', petId);
       if (!window || window.isDestroyed()) {
         ready = false;
         const next = deps.create({

@@ -96,6 +96,13 @@ const guard = setTimeout(() => {
       throw Error('Not ready: ' + label);
     };
     await until("!!document.querySelector('#pet-selection-save')", 'selection card');
+    const expectChatTarget = async (name) =>
+      until(
+        `document.querySelector('.pet-chat-tab[aria-pressed=true]')?.textContent.includes(${JSON.stringify(name)})`,
+        'chat target ' + name,
+      );
+    await expectChatTarget('麦晓雯');
+    report.defaultChatTarget = 'maixiaowen';
     await js("document.querySelector('[data-tab=pets]').click()");
     assert.equal(await js("document.querySelector('[data-pet-mode=single]').getAttribute('aria-pressed')"), 'true');
     assert.equal(await js("document.querySelector('input[name=desktop-pet-choice]:checked').value"), 'maixiaowen');
@@ -112,6 +119,7 @@ const guard = setTimeout(() => {
       assert.equal(await js("document.querySelector('#dirty').hidden"), false);
       await save();
       await expectWindows(1);
+      await expectChatTarget('原大肥鱼');
       assert.equal((await config()).main.pets[0].display, 'desktop');
       await js("document.querySelector('[data-pet-mode=multiple]').click()");
       await choose('maixiaowen');
@@ -119,6 +127,34 @@ const guard = setTimeout(() => {
       await expectWindows(2);
       report.multipleWindows = await petWindows();
       assert.equal((await config()).main.desktopPetMode, 'multiple');
+      await expectChatTarget('原大肥鱼');
+      await js(
+        `(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'切换时保留这条草稿');input.dispatchEvent(new Event('input',{bubbles:true}))})()`,
+      );
+      const doubleClick = async (id) => {
+        for (const w of RealWindow.getAllWindows()) {
+          if (w.isDestroyed()) continue;
+          if (
+            await w.webContents
+              .executeJavaScript(`typeof sprites!=='undefined'&&sprites[0]?.pet.id===${JSON.stringify(id)}`)
+              .catch(() => false)
+          ) {
+            await w.webContents.executeJavaScript(
+              "document.querySelector('.pet-hit').dispatchEvent(new MouseEvent('dblclick',{bubbles:true}))",
+            );
+            return;
+          }
+        }
+        throw Error('Missing pet window ' + id);
+      };
+      await doubleClick('maixiaowen');
+      await expectChatTarget('麦晓雯');
+      assert.equal(await js("document.querySelector('textarea.pet-chat-input').value"), '切换时保留这条草稿');
+      await doubleClick('main');
+      await expectChatTarget('原大肥鱼');
+      assert.equal(await js("document.querySelector('textarea.pet-chat-input').value"), '切换时保留这条草稿');
+      report.nativePetTarget = true;
+      await js("document.querySelector('[data-tab=pets]').click()");
       await js("document.querySelector('input[name=desktop-pet-choice]:checked').click()");
       await js("document.querySelector('input[name=desktop-pet-choice]:checked').click()");
       assert.equal(await js("document.querySelector('#pet-selection-save').disabled"), true);
@@ -129,6 +165,7 @@ const guard = setTimeout(() => {
       await choose('maixiaowen');
       await save();
       await expectWindows(1);
+      await expectChatTarget('麦晓雯');
       // A new same-kind instance must appear even while the selection draft is unsaved.
       await js("document.querySelector('[data-pet-mode=multiple]').click()");
       await js(
@@ -151,6 +188,46 @@ const guard = setTimeout(() => {
       assert.equal(await js('document.documentElement.scrollWidth<=innerWidth'), true);
       assert.equal(await js("document.querySelector('#panel-config .scroll').firstElementChild.id"), 'settings');
       fs.writeFileSync(path.join(run, 'pet-selection-390.png'), (await chat.webContents.capturePage()).toPNG());
+      if (process.env.DSH_PET_SELECTION_CHAT === '1') {
+        const source = process.env.DSH_PET_SELECTION_CHAT_SOURCE || 'codex';
+        const response = await fetch(origin + '/standalone-ai/settings', {
+          method: 'POST',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            protocol: source,
+            model: source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash',
+            timeoutMs: 60000,
+          }),
+        });
+        assert.equal(response.status, 200);
+        await response.json();
+        await js("document.querySelector('[data-tab=chat]').click()");
+        report.chatActions = [];
+        for (const [text, action] of [
+          ['展示天圆地方', '展示天圆地方'],
+          ['拿出一颗非洲之心给我看看', '展示非洲之心'],
+        ]) {
+          await js(
+            `(()=>{const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,${JSON.stringify(text)});input.dispatchEvent(new Event('input',{bubbles:true}))})()`,
+          );
+          await wait(50);
+          await js("document.querySelector('.pet-chat-send').click()");
+          let state, receipt;
+          for (let i = 0; i < 400; i++) {
+            state = await (await fetch(origin + '/dsh-pet-7340/state', { headers })).json();
+            const anim = state.pets.maixiaowen?.anim?.data;
+            if (anim?.name === action && anim.playbackId) {
+              receipt = await (await fetch(origin + '/dsh-pet-7340/playback/' + anim.playbackId, { headers })).json();
+              if (['playing', 'ended'].includes(receipt.status)) break;
+            }
+            await wait(100);
+          }
+          assert.ok(['playing', 'ended'].includes(receipt?.status), 'Chat must play ' + action);
+          await until("!document.querySelector('.pet-chat-send').classList.contains('is-busy')", 'chat finished');
+          report.chatActions.push({ source, pet: 'maixiaowen', action, playback: receipt.status });
+        }
+        fs.writeFileSync(path.join(run, 'pet-target-chat.png'), (await chat.webContents.capturePage()).toPNG());
+      }
     }
     const saved = await config();
     assert.equal(saved.main.desktopPetMode, 'single');

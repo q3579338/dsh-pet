@@ -11,8 +11,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('petBridge', {
   ...(process.argv.includes('--codex-companion-chat')
     ? {
-        openChat() {
-          ipcRenderer.send('codex-bigfish:chat');
+        openChat(petId) {
+          ipcRenderer.send('codex-bigfish:chat', typeof petId === 'string' ? petId : undefined);
         },
       }
     : {}),

@@ -444,7 +444,7 @@ Object.assign(PetSprite.prototype, {
   onHotkey(e) {
     if (this.hoverBody && S.isHearHotkey(e) && typeof window.petBridge?.openChat === 'function') {
       e.preventDefault();
-      if (!e.repeat) window.petBridge.openChat();
+      if (!e.repeat) window.petBridge.openChat(this.pet.id);
       return;
     }
     // 按住说话先判：它要吃掉按住期间的自动重复，晚一步就会被输入框收走

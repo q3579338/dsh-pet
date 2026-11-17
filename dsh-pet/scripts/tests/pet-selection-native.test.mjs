@@ -87,7 +87,10 @@ test(
         assert.equal(result.shown, false);
         assert.equal(result.dialogs, 0);
       }
-      assert.equal(await readFile(join(folder, 'memory.json'), 'utf8'), '{}');
+      if (process.env.DSH_PET_SELECTION_CHAT === '1') {
+        const memory = JSON.parse(await readFile(join(folder, 'memory.json'), 'utf8'));
+        assert.deepEqual(Object.keys(memory), ['maixiaowen']);
+      } else assert.equal(await readFile(join(folder, 'memory.json'), 'utf8'), '{}');
       assert.equal(
         await readFile(join(folder, 'long-term-memory/preservation-fixture.json'), 'utf8'),
         '{"fixture":"keep"}',
@@ -96,7 +99,7 @@ test(
       if (process.env.DSH_PET_SELECTION_EVIDENCE) {
         const evidence = resolve(process.env.DSH_PET_SELECTION_EVIDENCE);
         await mkdir(evidence, { recursive: true });
-        for (const name of ['switch.json', 'restart.json', 'pet-selection-390.png']) {
+        for (const name of ['switch.json', 'restart.json', 'pet-selection-390.png', 'pet-target-chat.png']) {
           const bytes = await readFile(join(run, name)).catch(() => null);
           if (bytes) await writeFile(join(evidence, name), bytes);
         }

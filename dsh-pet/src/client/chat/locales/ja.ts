@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const ja: Record<Key, string> = {
   tabTitle: 'ペット会話',
   tabGuide: 'すべてのデスクトップペットと会話します。タブをクリックして切り替えます',
+  petNotDisplayed: '（デスクトップ非表示）',
   loading: '読み込み中…',
   emptyNoPet: '会話できるペットがいません',
   emptyNoChat: 'まだ会話がありません',

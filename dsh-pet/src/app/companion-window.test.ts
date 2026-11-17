@@ -93,3 +93,35 @@ test('native chat opens on request, reuses its draft and recreates only after cl
   companion.open();
   assert.equal(created.length, 2);
 });
+
+test('打开指定宠物用自己的查询参数，已打开窗口用事件切换而不刷新草稿', async () => {
+  const urls: string[] = [],
+    scripts: string[] = [];
+  const companion = createCompanionWindow({
+    settingsUrl: 'http://127.0.0.1:1234/',
+    log() {},
+    create: () => ({
+      isDestroyed: () => false,
+      showInactive() {},
+      focus() {},
+      once() {},
+      async loadURL(url) {
+        urls.push(url);
+      },
+      webContents: {
+        on() {},
+        async executeJavaScript(script) {
+          scripts.push(script);
+        },
+      },
+    }),
+  });
+  companion.open('chat', false, 'mai');
+  await Promise.resolve();
+  assert.equal(new URL(urls[0]).searchParams.get('pet'), 'mai');
+  companion.open('chat', false, 'main');
+  await Promise.resolve();
+  assert.equal(urls.length, 1);
+  assert.match(scripts[0], /pet-chat-target/);
+  assert.match(scripts[0], /main/);
+});

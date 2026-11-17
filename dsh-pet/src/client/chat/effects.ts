@@ -9,6 +9,7 @@ import { fetchChatConfig, fetchOrphans } from './api.ts';
 import { INPUT_MAX_HEIGHT } from './metrics.ts';
 import type { ChatPanelRuntime } from './runtime.ts';
 import type { PanelData } from './types.ts';
+import { chooseChatPetId } from './pet-target.ts';
 
 /** 副作用需要的状态与句柄。 */
 export interface ChatEffectsInput {
@@ -32,29 +33,63 @@ export function createChatEffects(rt: ChatPanelRuntime): (input: ChatEffectsInpu
   const { useEffect } = rt;
 
   return function useChatEffects(input: ChatEffectsInput): void {
-    const { data, fail, listRef, draftRef, newestTs, patch, reload } = input;
+    const { data, listRef, draftRef, newestTs, reload } = input;
+    const latest = rt.useRef(input);
+    latest.current = input;
 
     // 首次装配：宠物列表 + 孤儿提示 + 第一只宠物的历史。只跑一次，所以依赖留空。
     useEffect(() => {
-      void (async () => {
+      let live = true;
+      let version = 0;
+      const load = async (followVisible = false, requestedId = ''): Promise<void> => {
+        const request = ++version;
         try {
           // 孤儿历史与配置一起拉：配置里还带着每个条目的记忆轮数（记忆边界线要用）
           const [config, orphans] = await Promise.all([fetchChatConfig(), fetchOrphans().catch(() => [])]);
-          const first = config.pets[0]?.id ?? '';
-          patch({
+          if (!live || request !== version) return;
+          const current = latest.current;
+          const first = config.pets.some((pet) => pet.id === requestedId)
+            ? requestedId
+            : chooseChatPetId(config.pets, current.data.petId, rt.speechInput === true, followVisible);
+          const switched = first !== current.data.petId;
+          current.patch({
             pets: config.pets,
             roundsByEntry: config.roundsByEntry,
             personas: config.personaByPet,
             petId: first,
             orphans,
+            ...(switched
+              ? { messages: [], selected: [], selecting: false, pending: null, busy: false, error: '' }
+              : {}),
           });
-          await reload(first);
+          await current.reload(first);
         } catch (error) {
-          fail(error);
+          if (live && request === version) latest.current.fail(error);
         } finally {
-          patch({ loading: false });
+          if (live && request === version) latest.current.patch({ loading: false });
         }
-      })();
+      };
+      const selectionChanged = (): void => {
+        void load(true);
+      };
+      const targetRequested = (event: Event): void => {
+        const id = (event as CustomEvent<{ petId?: unknown }>).detail?.petId;
+        if (typeof id === 'string') void load(false, id);
+      };
+      if (rt.speechInput) {
+        window.addEventListener('pet-selection-changed', selectionChanged);
+        window.addEventListener('pet-chat-target', targetRequested);
+      }
+      const requested = rt.speechInput ? (new URLSearchParams(location.search).get('pet') ?? '') : '';
+      void load(false, requested);
+      return () => {
+        live = false;
+        version++;
+        if (rt.speechInput) {
+          window.removeEventListener('pet-selection-changed', selectionChanged);
+          window.removeEventListener('pet-chat-target', targetRequested);
+        }
+      };
       // reload/fail/patch 每次渲染都会重建，放进依赖会让这个效应反复重跑。
       // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在挂载时执行一次，见上
     }, []);

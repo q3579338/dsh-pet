@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const ru: Record<Key, string> = {
   tabTitle: 'Чат с питомцами',
   tabGuide: 'Общайтесь со всеми настольными питомцами; нажмите на вкладку, чтобы переключиться',
+  petNotDisplayed: ' (не на рабочем столе)',
   loading: 'Загрузка…',
   emptyNoPet: 'Нет питомцев для общения',
   emptyNoChat: 'Разговоров ещё нет',

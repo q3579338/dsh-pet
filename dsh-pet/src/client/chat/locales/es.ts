@@ -6,6 +6,7 @@ import type { Key } from './zh.ts';
 export const es: Record<Key, string> = {
   tabTitle: 'Chat de mascotas',
   tabGuide: 'Habla con todas las mascotas de escritorio; haz clic en una pestaña para cambiar',
+  petNotDisplayed: ' (no visible en el escritorio)',
   loading: 'Cargando…',
   emptyNoPet: 'No hay mascotas con las que hablar',
   emptyNoChat: 'Aún no hay conversaciones',

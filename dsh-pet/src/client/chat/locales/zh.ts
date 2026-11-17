@@ -4,6 +4,7 @@
 export const zh = {
   tabTitle: '桌宠对话',
   tabGuide: '与所有桌宠对话，点标签切换',
+  petNotDisplayed: '（未在桌面显示）',
   loading: '加载中…',
   emptyNoPet: '没有可对话的桌宠',
   emptyNoChat: '还没有聊过天',

@@ -57,7 +57,7 @@ const { app, session, nativeImage, screen, BrowserWindow, ipcMain, dialog } = cr
     new (options: Record<string, unknown>): CompanionWindow;
     getAllWindows(): Array<{ isDestroyed(): boolean; isVisible(): boolean; showInactive(): void }>;
   };
-  ipcMain: { on(event: 'codex-bigfish:chat', listener: () => void): void };
+  ipcMain: { on(event: 'codex-bigfish:chat', listener: (event: unknown, petId?: unknown) => void): void };
   dialog: { showMessageBoxSync(window: CompanionWindow, options: Record<string, unknown>): number };
   session: { defaultSession: DesktopSession };
   nativeImage: {
@@ -153,7 +153,11 @@ async function boot(): Promise<void> {
         noLink: true,
       }) === 1,
   });
-  ipcMain.on('codex-bigfish:chat', () => companion.open());
+  ipcMain.on('codex-bigfish:chat', (_event, requested) => {
+    const petId =
+      typeof requested === 'string' && desktopPets().some((pet) => pet.id === requested) ? requested : undefined;
+    companion.open('chat', true, petId);
+  });
   app.on('codex-bigfish:chat', (view) => companion.open(view));
   log(`本机服务 ${origin}`);
   const releaseRuntime = writeStandaloneRuntime(dshHomeDir(), {

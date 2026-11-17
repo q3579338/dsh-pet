@@ -145,6 +145,10 @@ async function loadAi() {
 }
 
 function boot() {
+  window.addEventListener('pet-open-view', event => {
+    const view = event.detail && event.detail.view;
+    if (['chat', 'config', 'pets', 'memory'].includes(view)) selectTab(view);
+  });
   window.addEventListener('pagehide', stopVoicePreview);
   wireTabs();
   wireMemory();

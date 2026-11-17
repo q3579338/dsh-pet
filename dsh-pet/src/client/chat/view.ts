@@ -10,9 +10,11 @@ import type { ChatPanelState } from './types.ts';
 import { composerNode, confirmNode, orphansNode, personaNode, toolsNode } from './view-node.ts';
 import { roundNode } from './view-message.ts';
 import type { LiveVoiceView } from './live-voice.ts';
+import { chatPetVisible } from './pet-target.ts';
 
 /** 宠物标签条：点击切换对话。 */
-function tabsNode(h: ChatPanelRuntime['h'], state: ChatPanelState): unknown {
+function tabsNode(rt: ChatPanelRuntime, state: ChatPanelState): unknown {
+  const { h } = rt;
   return h('div', {
     className: 'pet-chat-tabs',
     children: state.pets.map((pet) =>
@@ -22,7 +24,7 @@ function tabsNode(h: ChatPanelRuntime['h'], state: ChatPanelState): unknown {
         className: 'pet-chat-tab',
         'aria-pressed': String(pet.id === state.petId),
         onClick: () => state.pickPet(pet.id),
-        children: pet.name || pet.id,
+        children: (pet.name || pet.id) + (rt.speechInput && !chatPetVisible(pet, true) ? rt.t('petNotDisplayed') : ''),
       }),
     ),
   });
@@ -133,7 +135,7 @@ export function buildPanel(rt: ChatPanelRuntime, state: ChatPanelState, live?: L
       if (state.personaOpen && event.key === 'Escape') state.closePersona();
     },
     children: [
-      tabsNode(h, state),
+      tabsNode(rt, state),
       orphansNode(h, rt.t, state),
       toolsNode(h, rt.t, state),
       personaNode(h, state),

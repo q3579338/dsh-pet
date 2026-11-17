@@ -73,6 +73,7 @@ async function saveSelectedPets() {
     const merged = await callApi('POST', '/pet-selection', { mode: petSelection.mode, ids: petSelection.ids.slice() });
     if (!merged || merged.ok === false) throw new Error((merged && (merged.message || merged.reason)) || '保存失败，请重试。');
     markDirty(false, 'selection'); initDrafts(merged); renderPetsPanel();
+    window.dispatchEvent(new Event('pet-selection-changed'));
     petSelectionBusy = false; renderPetSelection();
     setStatus(byId('pet-selection-status'), '已保存，桌面显示 ' + petSelection.ids.length + ' 只宠物。', 'ok');
   } catch (error) {

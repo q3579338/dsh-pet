@@ -60,6 +60,10 @@ export function createPetChatState(rt: ChatPanelRuntime): () => ChatPanelState {
   return function usePetChatState(): ChatPanelState {
     // 版本号在面板挂载时生成：每次打开面板都重新挂载，换过头像后重开一定拿到新图。
     const [data, setData] = useState<PanelData>({ ...INITIAL, avatarVersion: Date.now() });
+    const latest = useRef(data);
+    latest.current = data;
+    const historyVersion = useRef(0);
+    const petVersion = useRef(0);
     const listRef = useRef<HTMLDivElement | null>(null);
     const draftRef = useRef<HTMLTextAreaElement | null>(null);
     /** 输入法组合态：必须跨渲染存活，重建一次就会把「正在组合」忘掉。 */
@@ -68,24 +72,40 @@ export function createPetChatState(rt: ChatPanelRuntime): () => ChatPanelState {
     /** 已贴到底的那条消息（`ts`）：只有它变化时才自动滚到底。 */
     const newestTs = useRef(0);
 
-    const patch = (next: Partial<PanelData>): void => setData((prev) => ({ ...prev, ...next }));
+    const patch = (next: Partial<PanelData>): void => {
+      if (next.petId !== undefined && next.petId !== latest.current.petId) {
+        petVersion.current++;
+        historyVersion.current++;
+      }
+      latest.current = { ...latest.current, ...next };
+      setData((prev) => ({ ...prev, ...next }));
+    };
     const fail = (error: unknown): void => patch({ error: error instanceof Error ? error.message : String(error) });
 
     /** 重读某只宠物的历史；失败只落在 error 上，不静默清空已有消息。 */
     const reload = async (petId: string): Promise<void> => {
-      if (petId === '') return;
+      if (petId === '' || latest.current.petId !== petId) return;
+      const version = ++historyVersion.current;
       try {
-        patch({ messages: await fetchHistory(petId) });
+        const messages = await fetchHistory(petId);
+        if (version === historyVersion.current && latest.current.petId === petId) patch({ messages });
       } catch (error) {
-        fail(error);
+        if (version === historyVersion.current && latest.current.petId === petId) fail(error);
       }
     };
 
     useChatEffects({ data, patch, fail, reload, listRef, draftRef, newestTs });
 
-    const ports = { read: () => data, patch, fail, reload };
+    const version = petVersion.current;
+    const ports = { read: () => latest.current, patch, fail, reload, isCurrent: () => version === petVersion.current };
     const history = createHistoryActions(ports);
-    const shell = createShellActions({ ports, history, listRef, pageRounds: PAGE_ROUNDS });
+    const shell = createShellActions({
+      ports,
+      history,
+      listRef,
+      pageRounds: PAGE_ROUNDS,
+      desktop: rt.speechInput === true,
+    });
     const sendActions = createSendActions(ports);
     const pet = data.pets.find((one) => one.id === data.petId);
     const allRounds = groupRounds(data.messages);
@@ -127,8 +147,10 @@ export function createPetChatState(rt: ChatPanelRuntime): () => ChatPanelState {
       listRef,
       draftRef,
       pickPet: (petId: string) => {
+        if (petId === latest.current.petId) return;
         patch({
           petId,
+          busy: false,
           messages: [],
           selected: [],
           selecting: false,
