@@ -1,11 +1,13 @@
 /** 将两家的即时语音送回已有桌宠气泡与播放回执链路；不合成第二份声音。 */
 import { readVoicePresentationFrame } from '../../shared/voice-presentation.ts';
-import { actionInstruction, extractChatAction, visibleChatText } from '../chat-action.ts';
+import { actionInstruction, resolveChatAction, visibleChatText } from '../chat-action.ts';
 import { playChatAction } from '../chat-presentation.ts';
 import type { PollStateStore } from '../state.ts';
 import type { PlaybackStore } from '../playback.ts';
+import { correctActionTranscript } from '../chat-showcase.ts';
 
 export interface VoicePresentation {
+  normalizeTranscript?(text: string): string;
   instructions(): string;
   modelInstruction?(): string;
   accept(frame: unknown): boolean;
@@ -73,6 +75,7 @@ export function createVoicePresentation(deps: {
   const users = new Set<string>(),
     closed = new Set<string>();
   let assistantId: string | undefined;
+  let userText = '';
   const close = (id: string | undefined) => {
     if (!id) return;
     closed.add(id);
@@ -106,6 +109,10 @@ export function createVoicePresentation(deps: {
     owned = deps.state.read().pets[deps.petId].say.counter;
   };
   return {
+    normalizeTranscript(text) {
+      const current = settings();
+      return current.available ? correctActionTranscript(text, current.actions) : text;
+    },
     modelInstruction() {
       const names = settings().actions;
       return names.length ? actionInstruction(names) : '';
@@ -134,6 +141,7 @@ export function createVoicePresentation(deps: {
         return false;
       }
       if (frame.type === 'interrupt') {
+        userText = '';
         close(assistantId);
         close(frame.turnId);
         assistantId = undefined;
@@ -143,11 +151,15 @@ export function createVoicePresentation(deps: {
       if (frame.type === 'user') {
         if (users.has(frame.turnId)) return true;
         users.add(frame.turnId);
+        userText = correctActionTranscript(frame.text, selected.actions);
         if (users.size > 64) users.delete(users.values().next().value!);
         close(assistantId);
         assistantId = undefined;
         clear();
-        const action = deps.mode === 'model' ? undefined : requestedVoiceAction(frame.text, selected.actions);
+        const action =
+          deps.mode === 'model'
+            ? undefined
+            : requestedVoiceAction(correctActionTranscript(frame.text, selected.actions), selected.actions);
         if (action) {
           playChatAction(deps.state, deps.playback, deps.petId, action);
         }
@@ -161,7 +173,7 @@ export function createVoicePresentation(deps: {
         previous = '';
         assistantId = frame.turnId;
       }
-      const parsed = extractChatAction(frame.text, selected.actions);
+      const parsed = resolveChatAction(frame.text, selected.actions, userText);
       if (deps.mode === 'model' && frame.complete && parsed.action)
         playChatAction(deps.state, deps.playback, deps.petId, parsed.action);
       pending = visibleChatText(frame.text, frame.complete);

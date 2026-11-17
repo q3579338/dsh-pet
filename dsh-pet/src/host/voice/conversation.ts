@@ -122,7 +122,8 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     const promise = deps
       .dictation(
         (text) => {
-          if (room.input?.asr === prepared) emit(room, { type: 'partial', text });
+          if (room.input?.asr === prepared)
+            emit(room, { type: 'partial', text: room.presentation?.normalizeTranscript?.(text) ?? text });
         },
         room.abort.signal,
         room.source,
@@ -157,7 +158,8 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   };
   const complete = async (room: Room, input: Input): Promise<void> => {
     try {
-      const user = await input.asr.finish();
+      const heard = await input.asr.finish();
+      const user = room.presentation?.normalizeTranscript?.(heard) ?? heard;
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       if (!user || !/[\p{L}\p{N}]/u.test(user)) return;
       const selection = deps.selection();

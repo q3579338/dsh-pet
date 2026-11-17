@@ -2,13 +2,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, cp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 test(
-  'WorkBuddy native DeepSeek continues voice turns with real custom tones and recovers from synthesis failure',
+  'selected provider continues voice turns with real custom tones, body actions and synthesis failure recovery',
   {
     skip:
       process.platform !== 'win32' ||
@@ -30,6 +30,23 @@ test(
         clickSoundEnabled: false,
       }),
     );
+    if (process.env.DSH_PET_VOICE_TEST_PACK) {
+      const folder = join(run, 'home/dsh-pet');
+      await cp(resolve(process.env.DSH_PET_VOICE_TEST_PACK), join(folder, 'pet'), { recursive: true });
+      const file = join(folder, 'pet/maixiaowen-config.json');
+      const pack = JSON.parse(await readFile(file, 'utf8'));
+      Object.assign(pack.pets[0], {
+        display: 'desktop',
+        whisperEnabled: false,
+        balanceEnabled: false,
+        workStatusEnabled: false,
+      });
+      await writeFile(file, JSON.stringify(pack));
+      const mainFile = join(folder, 'main-config.jsonc');
+      const main = JSON.parse(await readFile(mainFile, 'utf8'));
+      main.pets[0].display = 'none';
+      await writeFile(mainFile, JSON.stringify(main));
+    }
     const env = {
       ...process.env,
       DSH_HOME: join(run, 'home'),
@@ -56,10 +73,13 @@ test(
     });
     try {
       await new Promise((done, reject) => {
-        const timer = setTimeout(() => {
-          child.kill();
-          reject(Error('WorkBuddy语音后台验收超时'));
-        }, 190000);
+        const timer = setTimeout(
+          () => {
+            child.kill();
+            reject(Error('WorkBuddy语音后台验收超时'));
+          },
+          process.env.DSH_PET_SHOWCASE_CASES ? 250000 : 190000,
+        );
         child.once('error', (error) => {
           clearTimeout(timer);
           reject(error);
@@ -83,7 +103,28 @@ test(
       assert.equal(report.codexBalanceShown, true);
       assert.equal(report.sourceAtTop, true);
       assert.equal(report.longTermMemoryUi, true);
-      assert.equal(report.codexDictationCalls, env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? 1 : 0);
+      const cases = env.DSH_PET_SHOWCASE_CASES ? JSON.parse(env.DSH_PET_SHOWCASE_CASES) : [];
+      assert.equal(
+        report.codexDictationCalls,
+        env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? Math.max(1, cases.length) : 0,
+      );
+      if (cases.length) {
+        assert.ok(report.actualSpeechTextMatches.length >= 6);
+        assert.ok(new Set(report.actualSpeechTextMatches.map((row) => row.turn)).size >= 6);
+        assert.ok(report.live.recognized.length >= 8);
+        for (const tone of ['starbell', 'sugarbud', 'dango'])
+          for (const item of cases)
+            assert.ok(
+              report.showcases.some(
+                (row) =>
+                  row.tone === tone &&
+                  row.animation === item.action &&
+                  row.playbackStatus === 'playing' &&
+                  row.noExtraSpeech,
+              ),
+              tone + ' ' + item.action,
+            );
+      }
       if (env.DSH_PET_CONVERSATION_SOURCE === 'codex') assert.equal(report.workbuddyAsrChildren, 0);
       else assert.ok(report.workbuddyAsrChildren >= 6);
       for (const voice of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
@@ -103,6 +144,7 @@ test(
           'starbell-v1.mp3',
           'sugarbud-v1.mp3',
           'dango-v1.mp3',
+          'showcases.json',
         ]) {
           const bytes = await readFile(join(run, file)).catch(() => null);
           if (bytes) await writeFile(join(folder, file), bytes);

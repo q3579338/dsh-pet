@@ -55,6 +55,39 @@ test('连续语音与文字对话共享动作指令和解析，仅模型完成�
   }
 });
 
+test('连续展示两种藏品时，第二轮漏动作标记仍切换本体，收尾重传不重复播放或朗读', () => {
+  const state = new PollStateStore(),
+    playback = new PlaybackStore();
+  const presentation = createVoicePresentation({
+    petId: 'fish',
+    state,
+    playback,
+    mode: 'model',
+    settings: () => ({ available: true, actions: ['展示天圆地方', '展示非洲之心'] }),
+  });
+  try {
+    presentation.accept({ sequence: 1, type: 'user', turnId: '1', text: '请展示天圆地方给我看' });
+    presentation.accept({ sequence: 2, type: 'assistant', turnId: '1', text: '天圆地方登场～', complete: true });
+    assert.equal((state.read().pets.fish.anim.data as { name: string }).name, '展示天圆地方');
+    presentation.accept({ sequence: 3, type: 'user', turnId: '2', text: '拿出一颗非洲之心给我看看' });
+    presentation.accept({ sequence: 4, type: 'assistant', turnId: '2', text: '喏，非洲之心登场～', complete: true });
+    const animation = state.read().pets.fish.anim;
+    assert.equal((animation.data as { name: string }).name, '展示非洲之心');
+    assert.deepEqual(state.read().pets.fish.say.data, { text: '喏，非洲之心登场～', anim: false, duration: 10000 });
+    assert.equal(
+      presentation.accept({ sequence: 5, type: 'assistant', turnId: '2', text: '喏，非洲之心登场～', complete: true }),
+      false,
+    );
+    assert.equal(state.read().pets.fish.anim.counter, animation.counter);
+    presentation.accept({ sequence: 6, type: 'user', turnId: '3', text: '非洲之心是什么' });
+    presentation.accept({ sequence: 7, type: 'assistant', turnId: '3', text: '是游戏中的藏品。', complete: true });
+    assert.equal(state.read().pets.fish.anim.counter, animation.counter);
+  } finally {
+    presentation.dispose();
+    state.cancelAll();
+  }
+});
+
 test('动作标记在任意分块边界都不进入朗读，正文的合法叠词和日期保持完整', () => {
   const full = '哈哈，今天是2026年11月17日。\n[动作:吃西瓜]';
   for (let width = 1; width <= full.length; width++) {

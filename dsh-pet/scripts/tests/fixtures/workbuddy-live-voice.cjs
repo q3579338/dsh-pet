@@ -11,6 +11,8 @@ const run = process.env.FISH_TEST_RUN;
 const source = process.env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? 'codex' : 'workbuddy';
 const model = source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash';
 const label = source === 'codex' ? 'Codex' : 'WorkBuddy';
+const petId = process.env.DSH_PET_VOICE_TEST_PET_ID || 'main';
+const showcaseCases = process.env.DSH_PET_SHOWCASE_CASES ? JSON.parse(process.env.DSH_PET_SHOWCASE_CASES) : [];
 const report = { source, offscreen: true, shown: false, nativeCalls: 0 };
 report.codexDictationCalls = 0;
 report.codexChildren = 0;
@@ -61,10 +63,13 @@ app.commandLine.appendSwitch('user-data-dir', path.join(run, 'electron'));
 app.commandLine.appendSwitch('mute-audio');
 const normalizeSpeechText = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
-const guard = setTimeout(() => {
-  fs.writeFileSync(path.join(run, 'result.json'), JSON.stringify({ ...report, error: 'deadline' }, null, 2));
-  app.exit(1);
-}, 180000);
+const guard = setTimeout(
+  () => {
+    fs.writeFileSync(path.join(run, 'result.json'), JSON.stringify({ ...report, error: 'deadline' }, null, 2));
+    app.exit(1);
+  },
+  showcaseCases.length ? 240000 : 180000,
+);
 (async () => {
   let js;
   try {
@@ -83,50 +88,62 @@ const guard = setTimeout(() => {
     ).json();
     assert.equal(settings.protocol, source);
     const remembered = await (
-      await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', {
+      await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=' + encodeURIComponent(petId), {
         method: 'POST',
         headers,
         body: JSON.stringify({ text: '用户希望被称为「记忆测试星」', kind: 'profile' }),
       })
     ).json();
     assert.equal(remembered.ok, true);
-    const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        text:
-          process.env.DSH_PET_ACTION_PROBE === '1'
-            ? process.env.DSH_PET_ACTION_TEXT || '吃一块西瓜吃一块西瓜。'
-            : '测试。',
-        voice: 'windows/zh-CN',
-      }),
-    });
-    assert.equal(sample.status, 200);
-    const b64 = Buffer.from(await sample.arrayBuffer()).toString('base64');
-    const wrongSource = await (
-      await fetch(origin + '/dsh-pet-7340/voice/hear', {
+    const samples = [];
+    const cases = showcaseCases.length
+      ? showcaseCases
+      : [
+          {
+            text:
+              process.env.DSH_PET_ACTION_PROBE === '1'
+                ? process.env.DSH_PET_ACTION_TEXT || '吃一块西瓜吃一块西瓜。'
+                : '测试。',
+            word: process.env.DSH_PET_ACTION_PROBE === '1' ? '西瓜' : '测试',
+          },
+        ];
+    for (const item of cases) {
+      const sample = await fetch(origin + '/dsh-pet-7340/voice/speak', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ audio: b64, provider: source === 'codex' ? 'workbuddy' : 'codex' }),
-      })
-    ).json();
-    assert.equal(wrongSource.ok, false);
-    const recognized = await (
-      await fetch(origin + '/dsh-pet-7340/voice/hear', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ audio: b64, provider: source }),
-      })
-    ).json();
-    assert.equal(recognized.ok, true);
-    assert.match(recognized.text, process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/);
-    report.workbuddyUploadedRecognition = recognized.text;
+        body: JSON.stringify({
+          text: item.text,
+          voice: 'windows/zh-CN',
+        }),
+      });
+      assert.equal(sample.status, 200);
+      const b64 = Buffer.from(await sample.arrayBuffer()).toString('base64');
+      const wrongSource = await (
+        await fetch(origin + '/dsh-pet-7340/voice/hear', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ audio: b64, provider: source === 'codex' ? 'workbuddy' : 'codex' }),
+        })
+      ).json();
+      assert.equal(wrongSource.ok, false);
+      const recognized = await (
+        await fetch(origin + '/dsh-pet-7340/voice/hear', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ audio: b64, provider: source }),
+        })
+      ).json();
+      assert.equal(recognized.ok, true);
+      assert.ok(recognized.text.includes(item.word), 'Recognition must preserve ' + item.word + ': ' + recognized.text);
+      report.workbuddyUploadedRecognition = recognized.text;
+      samples.push(b64);
+    }
     if (source === 'workbuddy') {
       const wrongCall = await (
         await fetch(origin + '/dsh-pet-7340/voice/live/start', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ petId: 'main', sdp: 'v=0\ntest', styleId: 'natural' }),
+          body: JSON.stringify({ petId, sdp: 'v=0\ntest', styleId: 'natural' }),
         })
       ).json();
       assert.equal(wrongCall.ok, false);
@@ -146,13 +163,13 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     await js(`(async()=>{
-      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false,turn:0,turns:[]};
+      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false,turn:0,turns:[],audioRewinds:0,audioSeen:new WeakSet()};
       const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'保留这条草稿');input.dispatchEvent(new Event('input',{bubbles:true}));
       document.addEventListener('pet-custom-voice-play',event=>__wb.metrics.push({...event.detail,realSpeechEndMs:performance.now()-__wb.endAt,at:performance.now()}));
       document.addEventListener('pet-voice-model',event=>__wb.models.push(event.detail.model));
       document.addEventListener('pet-voice-recognized',event=>__wb.recognized.push({...event.detail,fromSpeechEndMs:performance.now()-__wb.endAt}));
       const nativePeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(nativePeer,{construct(target,args){__wb.peers++;return new target(...args)}});
-      const nativePlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;if(this.dataset.petCustomVoice)__wb.audios.push(this);return nativePlay.call(this)};
+      const nativePlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;if(this.dataset.petCustomVoice){__wb.audios.push(this);if(!__wb.audioSeen.has(this)){__wb.audioSeen.add(this);let last=0;this.addEventListener('timeupdate',()=>{if(!this.isConnected)return;if(this.currentTime+.15<last)__wb.audioRewinds++;last=this.currentTime});}}return nativePlay.call(this)};
       const nativeFetch=window.fetch;window.fetch=async(url,init)=>{
         if(String(url).includes('/voice/conversation/events?')){
           const response=await nativeFetch(url,init);
@@ -166,13 +183,16 @@ const guard = setTimeout(() => {
           void response.clone().arrayBuffer().then(bytes=>{row.bytes=bytes.byteLength;row.ready=true;row.aborted=init.signal?.aborted===true;if(row.type?.includes('audio')&&!__wb.samples[body.voice]){let str='';for(const v of new Uint8Array(bytes))str+=String.fromCharCode(v);__wb.samples[body.voice]=btoa(str)}}).catch(()=>{row.failed=true;row.aborted=init.signal?.aborted===true;});return response;
         }return nativeFetch(url,init);
       };
-      const bytes=Uint8Array.from(atob(${JSON.stringify(b64)}),x=>x.charCodeAt(0));window.__wbContext=new AudioContext();
+      window.__wbContext=new AudioContext();window.__wbSamples=[];
+      for(const b64 of ${JSON.stringify(samples)}){
+      const bytes=Uint8Array.from(atob(b64),x=>x.charCodeAt(0));
       const decoded=await __wbContext.decodeAudioData(bytes.buffer),pcm=decoded.getChannelData(0);let first=0,last=pcm.length-1;
       while(first<last&&Math.abs(pcm[first])<.005)first++;while(last>first&&Math.abs(pcm[last])<.005)last--;
       first=Math.max(0,first-Math.round(decoded.sampleRate*.02));last=Math.min(pcm.length-1,last+Math.round(decoded.sampleRate*.02));
-      window.__wbSample=__wbContext.createBuffer(1,last-first+1,decoded.sampleRate);__wbSample.copyToChannel(pcm.slice(first,last+1),0);
+      const sample=__wbContext.createBuffer(1,last-first+1,decoded.sampleRate);sample.copyToChannel(pcm.slice(first,last+1),0);__wbSamples.push(sample);
+      }
       navigator.mediaDevices.getUserMedia=async()=>{window.__wbDestination=__wbContext.createMediaStreamDestination();const stream=__wbDestination.stream;__wb.tracks.push(...stream.getTracks());return stream};
-      window.__wbSpeak=async()=>{await __wbContext.resume();const source=__wbContext.createBufferSource();source.buffer=__wbSample;source.connect(__wbDestination);await new Promise(done=>{source.onended=()=>{__wb.endAt=performance.now();source.disconnect();done()};source.start()})};
+      window.__wbSpeak=async(index=0)=>{await __wbContext.resume();const source=__wbContext.createBufferSource();source.buffer=__wbSamples[index];source.connect(__wbDestination);await new Promise(done=>{source.onended=()=>{__wb.endAt=performance.now();source.disconnect();done()};source.start()})};
     })()`);
     const until = async (expression, label, limit = 200) => {
       for (let i = 0; i < limit; i++) {
@@ -182,6 +202,22 @@ const guard = setTimeout(() => {
       throw Error(label + ': ' + (await js("document.querySelector('.pet-chat-live-status')?.textContent")));
     };
     report.actualSpeechTextMatches = [];
+    report.showcases = [];
+    const checkShowcase = async (tone, index, hold = true) => {
+      const item = showcaseCases[index];
+      const result = await require('./voice-presentation.cjs')({
+        windows: () => RealWindow.getAllWindows(),
+        origin,
+        headers,
+        run,
+        petId,
+        expected: item?.action || '吃西瓜',
+        hold,
+        speechCount: () => js('__wb.voiceRequests.length'),
+      });
+      if (item) report.showcases.push({ ...result, tone });
+      return result;
+    };
     const waitFullSpeech = async () => {
       if (process.env.DSH_PET_SPEECH_PROBE !== '1') return;
       for (let i = 0; i < 250; i++) {
@@ -215,26 +251,33 @@ const guard = setTimeout(() => {
       assert.equal(state.sections.voiceSession.data.active, false);
     };
     const balance = await (
-      await fetch(origin + '/dsh-pet-7340/balance?pet=main&surface=any', { method: 'POST', headers, body: '{}' })
+      await fetch(origin + '/dsh-pet-7340/balance?pet=' + encodeURIComponent(petId) + '&surface=any', {
+        method: 'POST',
+        headers,
+        body: '{}',
+      })
     ).json();
     report.balancePrimed = balance.ok === true;
     assert.equal(report.balancePrimed, true);
     await start('starbell');
     await js('__wbSpeak()');
     await until('__wb.metrics.length>=1', 'first Starbell reply');
-    if (process.env.DSH_PET_ACTION_PROBE === '1')
+    if (showcaseCases.length) report.presentation = await checkShowcase('starbell', 0, false);
+    else if (process.env.DSH_PET_ACTION_PROBE === '1')
       report.presentation = await require('./voice-presentation.cjs')({
         windows: () => RealWindow.getAllWindows(),
         origin,
         headers,
         run,
+        petId,
       });
     await js('window.__oldAudios=__wb.audios.slice()');
-    await js('__wbSpeak()');
+    await js(showcaseCases.length ? '__wbSpeak(1)' : '__wbSpeak()');
     report.bargeInStoppedOld = await js('__oldAudios.every(audio=>audio.paused)');
     assert.equal(report.bargeInStoppedOld, true);
     await until('__wb.metrics.length>=2', 'second continuous reply');
     await waitFullSpeech();
+    if (showcaseCases.length) await checkShowcase('starbell', 1);
     await wait(1000);
     await js('__wb.failOnce=true');
     await js('__wbSpeak()');
@@ -249,22 +292,31 @@ const guard = setTimeout(() => {
     await js('__wbSpeak()');
     await until('__wb.metrics.length>=3', 'reply after failed voice');
     await waitFullSpeech();
+    if (showcaseCases.length) await checkShowcase('starbell', 0);
     await until("!!__wb.samples['bigfish-cute/starbell-v1']", 'complete Starbell sample');
     await stop();
     for (const tone of ['sugarbud', 'dango']) {
       await start(tone);
-      await js('__wbSpeak()');
-      await until(`__wb.metrics.some(row=>row.voice==='bigfish-cute/${tone}-v1')`, tone + ' actual playback');
-      await until(`!!__wb.samples['bigfish-cute/${tone}-v1']`, tone + ' complete sample');
-      await waitFullSpeech();
+      for (let index = 0; index < Math.max(1, showcaseCases.length); index++) {
+        const before = await js('__wb.metrics.length');
+        await js('__wbSpeak(' + index + ')');
+        await until('__wb.metrics.length>' + before, tone + ' new actual playback');
+        await until(`__wb.metrics.some(row=>row.voice==='bigfish-cute/${tone}-v1')`, tone + ' actual playback');
+        await until(`!!__wb.samples['bigfish-cute/${tone}-v1']`, tone + ' complete sample');
+        await waitFullSpeech();
+        if (showcaseCases.length) {
+          await checkShowcase(tone, index);
+        }
+      }
       await stop();
     }
     if (process.env.DSH_PET_SPEECH_PROBE === '1') assert.ok(report.actualSpeechTextMatches.length >= 3);
     report.live = await js(
-      `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled})`,
+      `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled,audioRewinds:__wb.audioRewinds})`,
     );
     assert.equal(report.nativeCalls, 0);
-    assert.equal(report.codexDictationCalls, source === 'codex' ? 1 : 0);
+    assert.equal(report.codexDictationCalls, source === 'codex' ? samples.length : 0);
+    assert.equal(report.live.audioRewinds, 0, 'Audio playback must not jump back and repeat');
     if (source === 'workbuddy') assert.equal(report.codexChildren, 0);
     else assert.ok(report.codexChildren > 0);
     if (source === 'workbuddy') assert.ok(report.workbuddyAsrChildren >= 6);
@@ -274,7 +326,9 @@ const guard = setTimeout(() => {
     assert.ok(
       report.live.recognized.length >= 6 &&
         report.live.recognized.every((row) =>
-          (process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/).test(row.text),
+          showcaseCases.length
+            ? showcaseCases.some((item) => row.text.includes(item.word))
+            : (process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/).test(row.text),
         ),
     );
     assert.equal(report.live.draft, '保留这条草稿');
@@ -307,6 +361,7 @@ const guard = setTimeout(() => {
       report.miniImageChat = await require('./mini-image-chat.cjs')({
         windows: () => RealWindow.getAllWindows(),
         origin,
+        petId,
       });
 
     // 设置顶部来源选择及真实订阅查询：查询 Codex 草稿时，已保存来源仍保持 WorkBuddy。
@@ -341,7 +396,7 @@ const guard = setTimeout(() => {
     assert.equal(report.sourceAtTop, true);
     await js("document.querySelector('#save').click()");
     await until("!document.querySelector('#dirty')||document.querySelector('#dirty').hidden", 'save source');
-    report.longTermMemoryUi = await require('./long-term-memory-ui.cjs')({ chat, js, origin, headers, run });
+    report.longTermMemoryUi = await require('./long-term-memory-ui.cjs')({ chat, js, origin, headers, run, petId });
     chat.setSize(390, 844);
     await js("document.querySelector('#panel-config .scroll').scrollTop=0");
     await wait(100);
@@ -351,6 +406,8 @@ const guard = setTimeout(() => {
     fs.writeFileSync(path.join(run, 'workbuddy-live-offscreen.png'), (await chat.webContents.capturePage()).toPNG());
     assert.equal(report.shown, false);
     report.ok = true;
+    if (showcaseCases.length)
+      fs.writeFileSync(path.join(run, 'showcases.json'), JSON.stringify(report.showcases, null, 2));
     await fetch(origin + '/dsh-pet-7340/quit', { method: 'POST', headers, body: '{}' });
   } catch (error) {
     report.error = String(error?.stack ?? error?.message ?? error);

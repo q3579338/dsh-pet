@@ -2,7 +2,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-module.exports = async ({ chat, js, origin, headers, run }) => {
+module.exports = async ({ chat, js, origin, headers, run, petId = 'main' }) => {
   const wait = (ms) => new Promise((done) => setTimeout(done, ms));
   const until = async (code) => {
     for (let i = 0; i < 100; i++) {
@@ -12,17 +12,26 @@ module.exports = async ({ chat, js, origin, headers, run }) => {
     throw Error('Memory UI timeout: ' + code);
   };
   const api = async (method, extra = '', body) => {
-    const response = await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main' + extra, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    const response = await fetch(
+      origin + '/dsh-pet-7340/chat/long-term-memory?pet=' + encodeURIComponent(petId) + extra,
+      {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      },
+    );
     return response.json();
   };
   const before = await api('GET');
   assert.equal(before.ok, true);
   await js("document.querySelector('#tab-memory').click()");
   await until("document.querySelector('#memory-status').textContent.includes('已读取')");
+  if (petId !== 'main') {
+    await js(
+      `(()=>{const select=document.querySelector('#memory-pet');select.value=${JSON.stringify(petId)};select.dispatchEvent(new Event('change',{bubbles:true}))})()`,
+    );
+    await until("document.querySelector('#memory-status').textContent.includes('已读取')");
+  }
   assert.equal(await js("document.querySelector('#memory-items').textContent.includes('记忆测试星')"), true);
   // 输入、刷新、关闭保护都保留独立草稿。
   await js(

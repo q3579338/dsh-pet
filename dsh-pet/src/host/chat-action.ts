@@ -6,6 +6,8 @@
  * @module dsh-pet/src/host/chat-action
  */
 
+import { explicitShowcaseAction } from './chat-showcase.ts';
+
 /**
  * 对话联动可用的动作：`animations.categories` 下全部动作（去重，保持配置顺序）。
  *
@@ -74,6 +76,17 @@ export function extractChatAction(text: string, names: readonly string[]): { tex
     .replace(/\n{2,}/g, '\n')
     .trim();
   return action === undefined ? { text: body } : { text: body, action };
+}
+
+/** 两种对话共用决策：明确藏品请求按角色名单执行，普通语境保留模型动作。 */
+export function resolveChatAction(
+  text: string,
+  names: readonly string[],
+  userText: string,
+): { text: string; action?: string } {
+  const parsed = extractChatAction(text, names);
+  const explicit = explicitShowcaseAction(userText, names);
+  return explicit ? { ...parsed, action: explicit } : parsed;
 }
 
 /** 流式语音只交付正文；跨块的动作/配图标记先暂存，绝不把控制词念出来。 */

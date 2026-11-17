@@ -1,6 +1,6 @@
 /** 真实离屏宠物窗口内发送合成图片；不截图用户桌面、不使用系统输入。 */
 const assert = require('node:assert/strict');
-module.exports = async ({ windows, origin }) => {
+module.exports = async ({ windows, origin, petId = 'main' }) => {
   let pet;
   for (const win of windows())
     if (
@@ -18,7 +18,7 @@ module.exports = async ({ windows, origin }) => {
     const canvas=document.createElement('canvas');canvas.width=64;canvas.height=64;const ctx=canvas.getContext('2d');ctx.fillStyle='#33aa55';ctx.fillRect(0,0,64,64);
     const file=new File([await new Promise(done=>canvas.toBlob(done,'image/png'))],'green.png',{type:'image/png'});
     const encoded=await S.encodeImageFile(file);
-    S.mountChatDialog({petId:'main',surface:'desktop',baseUrl:${JSON.stringify(origin + '/dsh-pet-7340/chat')},x:20,y:20,initialEncoded:encoded});
+    S.mountChatDialog({petId:${JSON.stringify(petId)},surface:'desktop',baseUrl:${JSON.stringify(origin + '/dsh-pet-7340/chat')},x:20,y:20,initialEncoded:encoded});
     const input=document.querySelector('.dsh-pet-chat-input');input.value='这是一张合成测试图片，请只回答收到图片。';input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));
   })()`);
   let result;

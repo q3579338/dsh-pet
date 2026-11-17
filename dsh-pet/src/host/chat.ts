@@ -11,7 +11,7 @@
  */
 
 import { BlockAssembler, createAssistantMessage, createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm';
-import { actionInstruction, extractChatAction } from './chat-action.ts';
+import { actionInstruction, resolveChatAction } from './chat-action.ts';
 import type { PetImageRef } from './image-attachment.ts';
 import { PET_CALL_IDENTITY, noTextReason } from './llm-call.ts';
 import { supportsReasoningOff } from './llm-reasoning.ts';
@@ -263,7 +263,7 @@ async function generateWith(ctx: { llm?: unknown }, once: GenerateOnce): Promise
   if (!text) return { ok: false, reason: 'generate-error', message: noTextReason(assembler.finish) };
   if (!wantImage && !wantAction) return { ok: true, text };
   // 先剥动作再剥配图：两种标记互不依赖，顺序不影响结果；动作的无效名称也会被剥（见 extractChatAction）。
-  const acted: { text: string; action?: string } = wantAction ? extractChatAction(text, actions) : { text };
+  const acted: { text: string; action?: string } = wantAction ? resolveChatAction(text, actions, userText) : { text };
   const picked: { text: string; image?: string } = wantImage
     ? extractChatImage(acted.text, pool)
     : { text: acted.text };

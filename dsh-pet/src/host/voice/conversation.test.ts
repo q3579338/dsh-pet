@@ -216,6 +216,40 @@ test('WorkBuddy把完整识别、累计回复和取消交给同一桌宠画面�
     f.service.dispose();
   }
 });
+
+test('流式识别的角色专名纠正在字幕、模型和记忆中一致，不增加模型调用', async () => {
+  const heard: string[] = [];
+  const f = await fixture(
+    {
+      context: () => '',
+      remember: (_id, text) => {
+        heard.push(text);
+        return heard.length;
+      },
+    },
+    (petId) =>
+      createVoicePresentation({
+        petId,
+        state: new PollStateStore(),
+        playback: new PlaybackStore(),
+        mode: 'model',
+        settings: () => ({ available: true, actions: ['展示天圆地方'] }),
+      }),
+  );
+  try {
+    await f.service.audio(f.id, 1, 0, 'AAECAw==');
+    f.service.end(f.id, 1);
+    f.asrs[0].finishText('请展示天元地方给我看。');
+    const events = await f.until('done');
+    assert.ok(events.some((event) => event.type === 'user' && event.text === '请展示天圆地方给我看。'));
+    assert.deepEqual(heard, ['请展示天圆地方给我看。']);
+    assert.equal(f.requests.length, 1);
+    const messages = f.requests[0].messages;
+    assert.match(messages[messages.length - 1].content, /请展示天圆地方给我看/);
+  } finally {
+    f.service.dispose();
+  }
+});
 test('WorkBuddy 识别启动失败提示自己的来源，不显示原始错误或 Codex 登录提示', async () => {
   const states: boolean[] = [];
   const service = createVoiceConversation({
