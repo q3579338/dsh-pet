@@ -142,7 +142,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     room.presentation?.accept({
       sequence: ++room.presentationSequence,
       type: 'interrupt',
-      turnId: String(room.epoch),
+      turnId: 'interrupt-' + room.epoch,
       text: '',
     });
     emit(room, { type: 'interrupted' });

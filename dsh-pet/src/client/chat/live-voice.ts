@@ -127,7 +127,10 @@ function createCodexLiveVoiceControl(options: {
     }, 35000);
     const relevant = (): boolean => call === current && !current.abort.signal.aborted;
     current.presentation = createVoicePresentationSender(
-      (frame) => post('present', { sessionId: current.sessionId, frame }, current.abort.signal).then((r) => r.json()),
+      (frame, signal) =>
+        post('present', { sessionId: current.sessionId, frame }, AbortSignal.any([current.abort.signal, signal])).then(
+          (r) => r.json(),
+        ),
       () => relevant() && !!current.sessionId,
     );
     try {
@@ -196,7 +199,7 @@ function createCodexLiveVoiceControl(options: {
         current.stopMicWatch = watchMicrophoneSpeech(stream, () => {
           if (!relevant()) return;
           current.userTranscript.begin();
-          current.presentation?.emit({ type: 'interrupt', turnId: 'microphone', text: '' });
+          current.presentation?.emit({ type: 'interrupt', turnId: current.assistantId ?? 'microphone', text: '' });
           current.transcript.interrupt();
           if (current.speech?.busy()) current.speech.interrupt();
           current.speech?.prime?.();
@@ -347,7 +350,7 @@ function createCodexLiveVoiceControl(options: {
       else void start();
     },
     interrupt() {
-      call?.presentation?.emit({ type: 'interrupt', turnId: 'manual', text: '' });
+      call?.presentation?.emit({ type: 'interrupt', turnId: call.assistantId ?? 'manual', text: '' });
       call?.transcript.interrupt();
       call?.speech?.interrupt();
       if (call) paint({ message: '已停止这一句，麦克风仍在接收，可以继续说话。' });

@@ -56,6 +56,7 @@ Module._load = function (name, ...args) {
 };
 app.commandLine.appendSwitch('user-data-dir', path.join(run, 'electron'));
 app.commandLine.appendSwitch('mute-audio');
+const normalizeSpeechText = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const guard = setTimeout(() => {
   fs.writeFileSync(path.join(run, 'result.json'), JSON.stringify({ ...report, error: 'deadline' }, null, 2));
@@ -137,7 +138,7 @@ const guard = setTimeout(() => {
       await wait(100);
     }
     await js(`(async()=>{
-      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false};
+      window.__wb={tracks:[],peers:0,metrics:[],models:[],recognized:[],audios:[],voiceRequests:[],samples:{},failOnce:false,turn:0,turns:[]};
       const input=document.querySelector('textarea.pet-chat-input');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'保留这条草稿');input.dispatchEvent(new Event('input',{bubbles:true}));
       document.addEventListener('pet-custom-voice-play',event=>__wb.metrics.push({...event.detail,realSpeechEndMs:performance.now()-__wb.endAt,at:performance.now()}));
       document.addEventListener('pet-voice-model',event=>__wb.models.push(event.detail.model));
@@ -145,10 +146,16 @@ const guard = setTimeout(() => {
       const nativePeer=RTCPeerConnection;window.RTCPeerConnection=new Proxy(nativePeer,{construct(target,args){__wb.peers++;return new target(...args)}});
       const nativePlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){this.volume=0;if(this.dataset.petCustomVoice)__wb.audios.push(this);return nativePlay.call(this)};
       const nativeFetch=window.fetch;window.fetch=async(url,init)=>{
+        if(String(url).includes('/voice/conversation/events?')){
+          const response=await nativeFetch(url,init);
+          void(async()=>{const reader=response.clone().body.getReader(),decoder=new TextDecoder();let pending='';for(;;){const part=await reader.read();if(part.done)break;pending+=decoder.decode(part.value,{stream:true});let at;while((at=pending.indexOf('\\n'))>=0){const event=JSON.parse(pending.slice(0,at));pending=pending.slice(at+1);if(event.type==='reply'){__wb.turn++;__wb.turns.push({id:__wb.turn,text:''});}const turn=__wb.turns.at(-1);if(turn&&event.type==='text')turn.text+=event.text;if(turn&&event.type==='done')turn.complete=true;}}})().catch(()=>{});
+          return response;
+        }
+
         if(/\\/voice\\/(speak|stream)$/.test(String(url))){
-          const body=JSON.parse(init.body);if(__wb.failOnce){__wb.failOnce=false;__wb.failedAt=performance.now();return new Response(JSON.stringify({ok:false,message:'test temporary synthesis failure'}),{headers:{'content-type':'application/json'}})}
-          const began=performance.now();const response=await nativeFetch(url,init);const row={voice:body.voice,chars:body.text.length,headersMs:performance.now()-began,type:response.headers.get('content-type')};__wb.voiceRequests.push(row);
-          void response.clone().arrayBuffer().then(bytes=>{row.bytes=bytes.byteLength;if(row.type?.includes('audio')&&!__wb.samples[body.voice]){let str='';for(const v of new Uint8Array(bytes))str+=String.fromCharCode(v);__wb.samples[body.voice]=btoa(str)}}).catch(()=>{});return response;
+          const body=JSON.parse(init.body);if(__wb.failOnce){__wb.turns.at(-1).failed=true;__wb.failOnce=false;__wb.failedAt=performance.now();return new Response(JSON.stringify({ok:false,message:'test temporary synthesis failure'}),{headers:{'content-type':'application/json'}})}
+          const began=performance.now(),turn=__wb.turn;const response=await nativeFetch(url,init);const row={turn,text:body.text,voice:body.voice,chars:body.text.length,headersMs:performance.now()-began,type:response.headers.get('content-type')};__wb.voiceRequests.push(row);
+          void response.clone().arrayBuffer().then(bytes=>{row.bytes=bytes.byteLength;row.ready=true;row.aborted=init.signal?.aborted===true;if(row.type?.includes('audio')&&!__wb.samples[body.voice]){let str='';for(const v of new Uint8Array(bytes))str+=String.fromCharCode(v);__wb.samples[body.voice]=btoa(str)}}).catch(()=>{row.failed=true;row.aborted=init.signal?.aborted===true;});return response;
         }return nativeFetch(url,init);
       };
       const bytes=Uint8Array.from(atob(${JSON.stringify(b64)}),x=>x.charCodeAt(0));window.__wbContext=new AudioContext();
@@ -165,6 +172,21 @@ const guard = setTimeout(() => {
         await wait(100);
       }
       throw Error(label + ': ' + (await js("document.querySelector('.pet-chat-live-status')?.textContent")));
+    };
+    report.actualSpeechTextMatches = [];
+    const waitFullSpeech = async () => {
+      if (process.env.DSH_PET_SPEECH_PROBE !== '1') return;
+      for (let i = 0; i < 250; i++) {
+        const result = await js(
+          `(()=>{const turn=__wb.turns.at(-1);if(!turn?.complete||turn.failed)return;const requests=__wb.voiceRequests.filter(row=>row.turn===turn.id);const norm=(${normalizeSpeechText.toString()});if(requests.length&&requests.every(row=>row.ready&&!row.failed&&!row.aborted)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text))return {turn:turn.id,voice:requests[0].voice,matched:true};})()`,
+        );
+        if (result) {
+          report.actualSpeechTextMatches.push(result);
+          return;
+        }
+        await wait(100);
+      }
+      throw new Error('Complete WorkBuddy reply did not match actual synthesis text');
     };
     const start = async (tone) => {
       await js(
@@ -196,6 +218,7 @@ const guard = setTimeout(() => {
     report.bargeInStoppedOld = await js('__oldAudios.every(audio=>audio.paused)');
     assert.equal(report.bargeInStoppedOld, true);
     await until('__wb.metrics.length>=2', 'second continuous reply');
+    await waitFullSpeech();
     await wait(1000);
     await js('__wb.failOnce=true');
     await js('__wbSpeak()');
@@ -209,6 +232,7 @@ const guard = setTimeout(() => {
     assert.equal(report.keptMicrophoneOnFailure, true);
     await js('__wbSpeak()');
     await until('__wb.metrics.length>=3', 'reply after failed voice');
+    await waitFullSpeech();
     await until("!!__wb.samples['bigfish-cute/starbell-v1']", 'complete Starbell sample');
     await stop();
     for (const tone of ['sugarbud', 'dango']) {
@@ -216,8 +240,10 @@ const guard = setTimeout(() => {
       await js('__wbSpeak()');
       await until(`__wb.metrics.some(row=>row.voice==='bigfish-cute/${tone}-v1')`, tone + ' actual playback');
       await until(`!!__wb.samples['bigfish-cute/${tone}-v1']`, tone + ' complete sample');
+      await waitFullSpeech();
       await stop();
     }
+    if (process.env.DSH_PET_SPEECH_PROBE === '1') assert.ok(report.actualSpeechTextMatches.length >= 3);
     report.live = await js(
       `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled})`,
     );

@@ -14,6 +14,43 @@ test('吃西瓜等口语指令只匹配角色已有动作；否定、喜好和�
     assert.equal(requestedVoiceAction(text, text === '你吃西瓜' ? [] : names), undefined, text);
 });
 
+test('询问喜好、刚才发生的事和解释词语不误播，否定只作用于自己的分句', () => {
+  const names = ['吃西瓜', '小幅度原地360度旋转展示'];
+  for (const text of ['你喜欢吃西瓜吗', '我刚刚吃西瓜，你呢', '你昨天吃西瓜了吗', '你说吃西瓜是什么意思'])
+    assert.equal(requestedVoiceAction(text, names), undefined, text);
+  assert.equal(requestedVoiceAction('别吃西瓜，转个圈给我看', names), names[1]);
+  assert.equal(requestedVoiceAction('我想看你吃个西瓜', names), '吃西瓜');
+});
+
+test('打断和完成后的迟到字幕不能复活旧气泡，新轮继续正常显示', () => {
+  const state = new PollStateStore(),
+    playback = new PlaybackStore();
+  const view = createVoicePresentation({
+    petId: 'fish',
+    state,
+    playback,
+    settings: () => ({ available: true, actions: [] }),
+  });
+  try {
+    view.accept({ sequence: 1, type: 'assistant', turnId: 'old', text: '旧回复' });
+    view.accept({ sequence: 2, type: 'interrupt', turnId: 'old', text: '' });
+    assert.equal(
+      view.accept({ sequence: 3, type: 'assistant', turnId: 'old', text: '迟到的旧回复', complete: true }),
+      false,
+    );
+    assert.deepEqual(state.read().pets.fish.say.data, { clear: true });
+    assert.equal(
+      view.accept({ sequence: 4, type: 'assistant', turnId: 'new', text: '新的回答', complete: true }),
+      true,
+    );
+    assert.equal(view.accept({ sequence: 5, type: 'assistant', turnId: 'new', text: '重复收尾' }), false);
+    assert.equal((state.read().pets.fish.say.data as { text: string }).text, '新的回答');
+  } finally {
+    view.dispose();
+    state.cancelAll();
+  }
+});
+
 test('语音字幕进真实say叶子，不重复合成，不盖动画；同轮只演一次，过期帧拒绝', () => {
   const state = new PollStateStore(),
     playback = new PlaybackStore();

@@ -54,6 +54,8 @@ Module._load = function (name, ...args) {
 };
 app.commandLine.appendSwitch('user-data-dir', path.join(run, 'electron'));
 app.commandLine.appendSwitch('mute-audio');
+const speechProbe = process.env.DSH_PET_MEMORY_PROBE === '1' || process.env.DSH_PET_SPEECH_PROBE === '1';
+const normalizeSpeechText = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
 const wait = (ms) => new Promise((done) => setTimeout(done, ms));
 const guard = setTimeout(() => {
   fs.writeFileSync(path.join(run, 'result.json'), JSON.stringify({ ...report, error: 'deadline' }, null, 2));
@@ -163,12 +165,12 @@ const guard = setTimeout(() => {
     };
 
     const waitCompleteSpeech = async () => {
-      if (process.env.DSH_PET_MEMORY_PROBE !== '1') return;
+      if (!speechProbe) return;
       const target = await js('__live.currentAssistantTurnId');
       for (let i = 0; i < 250; i++) {
         if (
           await js(
-            `(()=>{const turn=__live.finalTexts.find(turn=>turn.id===${JSON.stringify(target)});if(!turn?.text)return false;const norm=text=>String(text||'').replace(/[^\\p{L}\\p{N}]/gu,'');const requests=__live.customRequests.filter(row=>row.turnId===turn.id);return requests.length>0&&requests.every(row=>row.readyAt&&!row.aborted&&!row.failed)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text);})()`,
+            `(()=>{const turn=__live.finalTexts.find(turn=>turn.id===${JSON.stringify(target)});if(!turn?.text)return false;const norm=(${normalizeSpeechText.toString()});const requests=__live.customRequests.filter(row=>row.turnId===turn.id);return requests.length>0&&requests.every(row=>row.readyAt&&!row.aborted&&!row.failed)&&norm(requests.map(row=>row.text).join(''))===norm(turn.text);})()`,
           )
         )
           return;
@@ -197,9 +199,9 @@ const guard = setTimeout(() => {
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
         const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
         const warm=String(url).endsWith('/voice/warm')?{active:JSON.parse(init?.body||'{}').active,at:performance.now()}:undefined;if(warm)__live.warmRequests.push(warm);
-        const queuedAt=performance.now();const response=await originalFetch(url,init);
+        const queuedAt=performance.now(),turnId=__live.currentAssistantTurnId;const response=await originalFetch(url,init);
         if(warm)void response.clone().json().then(value=>Object.assign(warm,{status:response.status,prepared:value.prepared,reason:value.reason})).catch(()=>{});
-        if(voice){const row={voice,turnId:__live.currentAssistantTurnId,text:JSON.parse(init.body).text,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
+        if(voice){const row={voice,turnId,text:JSON.parse(init.body).text,queuedAt,headersAt:performance.now(),path:String(url),type:response.headers.get('content-type')};__live.customRequests.push(row);void response.clone().arrayBuffer().then(bytes=>{Object.assign(row,{readyAt:performance.now(),bytes:bytes.byteLength,aborted:init?.signal?.aborted===true});if(row.type?.includes('audio')&&!__live.voiceSamples[voice]){let binary='';for(const value of new Uint8Array(bytes))binary+=String.fromCharCode(value);__live.voiceSamples[voice]=btoa(binary);}}).catch(()=>{row.aborted=init?.signal?.aborted===true;row.failed=true;});}
         return response;
       };
       const buffer=Uint8Array.from(atob(${JSON.stringify(b64)}),c=>c.charCodeAt(0));
@@ -267,7 +269,7 @@ const guard = setTimeout(() => {
         break;
       await wait(100);
     }
-    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+    if (speechProbe) {
       for (let i = 0; i < 200; i++) {
         if (await js('__live.turns>=2')) break;
         await wait(100);
@@ -342,7 +344,7 @@ const guard = setTimeout(() => {
       if (await js("!!__live.voiceSamples['bigfish-cute/sugarbud-v1']")) break;
       await wait(100);
     }
-    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+    if (speechProbe) {
       for (let i = 0; i < 200; i++) {
         if (await js('__live.turns>=3')) break;
         await wait(100);
@@ -375,27 +377,26 @@ const guard = setTimeout(() => {
         break;
       await wait(100);
     }
-    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+    if (speechProbe) {
       for (let i = 0; i < 200; i++) {
         if (await js('__live.turns>=4')) break;
         await wait(100);
       }
     }
     await waitCompleteSpeech();
-    if (process.env.DSH_PET_MEMORY_PROBE === '1') await wait(1200);
+    if (speechProbe) await wait(1200);
     report.custom = await js(
       '({requests:__live.customRequests,played:__live.customPlayed,metrics:__live.metrics,assistantDoneAt:__live.assistantDoneAt,wire:__live.wire,warmRequests:__live.warmRequests,interruptedTurnId:__live.interruptedTurnId,finalTexts:__live.finalTexts})',
     );
-    if (process.env.DSH_PET_MEMORY_PROBE === '1') {
+    if (speechProbe) {
       let matched = 0;
-      const normalized = (text) => String(text || '').replace(/[^\p{L}\p{N}]/gu, '');
       for (const turn of report.custom.finalTexts) {
         if (turn.id === report.custom.interruptedTurnId) continue;
         const requests = report.custom.requests.filter((row) => row.turnId === turn.id);
         if (!requests.length || requests.some((row) => row.aborted || row.failed) || !turn.text) continue;
         assert.equal(
-          normalized(requests.map((row) => row.text).join('')),
-          normalized(turn.text),
+          normalizeSpeechText(requests.map((row) => row.text).join('')),
+          normalizeSpeechText(turn.text),
           'Actual TTS input must match the completed assistant transcript without duplicated words',
         );
         matched++;
