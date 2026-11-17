@@ -41,6 +41,7 @@ export interface CardAnimationInput {
   videoB: () => HTMLVideoElement | null;
   /** 点播回执：真实播放结果只有浏览器侧知道。 */
   report: OwnAnimationDeps['report'];
+  chatBubbleVisible?: () => boolean;
   /** 挂载瞬间的锁叶子：只用于决定动画链初始是否冻结。 */
   lock?: LockState;
   /** 消费掉点播编号，避免 effect 再跑一趟。 */
@@ -71,6 +72,7 @@ export function createCardAnimation(rt: CardAnimationRuntime) {
       workStatus: () => workStatusRef.current,
       facing: () => card.facingRef.current,
       report: input.report,
+      chatBubbleVisible: input.chatBubbleVisible,
       clearCuePlayback: () => input.setCuePlayback(null),
       onFrontReady: (el) => {
         // 点击 Q 弹要等新动画就位后才压，压的是新首帧。

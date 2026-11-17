@@ -203,6 +203,7 @@ const guard = setTimeout(() => {
         await response.json();
         await js("document.querySelector('[data-tab=chat]').click()");
         report.chatActions = [];
+        let previousPlayback;
         for (const [text, action] of [
           ['展示天圆地方', '展示天圆地方'],
           ['拿出一颗非洲之心给我看看', '展示非洲之心'],
@@ -223,10 +224,84 @@ const guard = setTimeout(() => {
             await wait(100);
           }
           assert.ok(['playing', 'ended'].includes(receipt?.status), 'Chat must play ' + action);
+          if (process.env.DSH_PET_SELECTION_ANIMATION_HOLD === '1') {
+            const playbackId = state.pets.maixiaowen.anim.data.playbackId;
+            await wait(3200);
+            const held = await (await fetch(origin + '/dsh-pet-7340/playback/' + playbackId, { headers })).json();
+            assert.equal(
+              held.status,
+              'playing',
+              'Short clip must still be visibly demonstrating after its first cycle',
+            );
+            let pet;
+            for (const w of RealWindow.getAllWindows())
+              if (
+                !w.isDestroyed() &&
+                (await w.webContents
+                  .executeJavaScript("typeof sprites!=='undefined'&&sprites[0]?.pet.id==='maixiaowen'")
+                  .catch(() => false))
+              ) {
+                pet = w;
+                break;
+              }
+            assert.ok(pet);
+            const view = await pet.webContents.executeJavaScript(
+              "({anim:sprites[0].anim,time:document.querySelector('video.is-front').currentTime,paused:document.querySelector('video.is-front').paused,image:sprites[0].whisperImage,bubbleImages:document.querySelectorAll('.pet-bubble img').length})",
+            );
+            assert.equal(view.anim, action);
+            assert.equal(view.paused, false);
+            assert.equal(view.image, '');
+            assert.equal(view.bubbleImages, 0);
+            await wait(150);
+            assert.notEqual(
+              await pet.webContents.executeJavaScript("document.querySelector('video.is-front').currentTime"),
+              view.time,
+              'Demonstration must keep advancing, not freeze on a poster',
+            );
+            await pet.webContents.executeJavaScript(
+              "(()=>{const s=sprites[0];s.pet.workStatusEnabled=true;s.onWorkTick({state:'working',task:'后台任务更新'},s.prevWorkTick+1);s.pet.workStatusEnabled=false})()",
+            );
+            assert.equal(
+              await pet.webContents.executeJavaScript('sprites[0].anim'),
+              action,
+              'Automatic work animation must yield to the requested showcase',
+            );
+            assert.equal(
+              await pet.webContents.executeJavaScript('sprites[0].workText'),
+              '后台任务更新',
+              'Work status text must remain current while its animation yields',
+            );
+            const say = await (await fetch(origin + '/dsh-pet-7340/state', { headers })).json();
+            assert.equal(say.pets.maixiaowen.say.data.image, undefined);
+            if (previousPlayback) {
+              const old = await (
+                await fetch(origin + '/dsh-pet-7340/playback/' + previousPlayback, { headers })
+              ).json();
+              assert.equal(old.status, 'cancelled');
+            }
+            previousPlayback = playbackId;
+            report.demonstrationHeld = true;
+            fs.writeFileSync(path.join(run, 'body-' + action + '.png'), (await pet.webContents.capturePage()).toPNG());
+          }
           await until("!document.querySelector('.pet-chat-send').classList.contains('is-busy')", 'chat finished');
           report.chatActions.push({ source, pet: 'maixiaowen', action, playback: receipt.status });
         }
         fs.writeFileSync(path.join(run, 'pet-target-chat.png'), (await chat.webContents.capturePage()).toPNG());
+        if (previousPlayback) {
+          await fetch(origin + '/dsh-pet-7340/bubble/clear?pet=maixiaowen&surface=desktop', {
+            method: 'POST',
+            headers: { ...headers, 'content-type': 'application/json' },
+            body: '{}',
+          });
+          let receipt;
+          for (let i = 0; i < 80; i++) {
+            receipt = await (await fetch(origin + '/dsh-pet-7340/playback/' + previousPlayback, { headers })).json();
+            if (receipt.status === 'ended') break;
+            await wait(100);
+          }
+          assert.equal(receipt.status, 'ended', 'Clearing the bubble must release the showcase, not loop forever');
+          report.showcaseReleased = true;
+        }
       }
     }
     const saved = await config();

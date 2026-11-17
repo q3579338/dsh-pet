@@ -160,6 +160,8 @@ export interface BubbleSlotsInput {
 
 /** 气泡单槽对外的读写面。 */
 export interface BubbleSlots {
+  /** 通过稳定 ref 读取说话气泡是否仍在，供短聊天动画续播。 */
+  isWhisperVisible?: () => boolean;
   /** 点亮余额气泡并回到第一页，重置停留计时。 */
   showBalance(): void;
   /** 点亮环境气泡，重置停留计时。 */
@@ -392,6 +394,7 @@ export function createBubbleSlots(rt: BubbleSlotsRuntime, components: BubbleComp
     };
 
     return {
+      isWhisperVisible: () => whisperHoldRef.current.on,
       clearWhisper,
       cycleBalance,
       hideTodo,

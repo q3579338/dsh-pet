@@ -425,6 +425,26 @@ describe('createChatMemory —— 对话回复的 voiceTo', () => {
 describe('createChatMemory —— 对话动作联动', () => {
   /** 收集一次对话写了哪些叶子与载荷。 */
   type Records = Array<{ petId: string; leaf: string; data: Record<string, unknown> }>;
+  test('回复同时配图与动作：本体展示、桌面气泡只写文字，聊天记录仍保留配图', async () => {
+    const ws = tempWorkspace({ chatImageEnabled: true, chatAnimationEnabled: true, memes: { 可爱: '卖萌立绘' } });
+    mkdirSync(ws.memeDir, { recursive: true });
+    writeFileSync(join(ws.memeDir, '可爱.png'), '');
+    const records: Records = [];
+    try {
+      const r = await createMemory('看我表演～\n[图:可爱]\n[动作:优雅女仆舞]', ws, ws.memeDir, { records }).chatWithPet(
+        'main',
+        '表演给我看',
+      );
+      assert.equal(r.ok, true);
+      assert.equal(records.find((row) => row.leaf === 'anim')?.data.chatHold, true);
+      const say = records.find((row) => row.leaf === 'say')?.data;
+      assert.equal(say?.anim, false);
+      assert.equal(say?.image, undefined);
+      assert.equal(readMessages(ws.userRoot)[1].meme, '可爱');
+    } finally {
+      rmSync(ws.dir, { recursive: true, force: true });
+    }
+  });
 
   test('命中动作：先写 anim 叶子（带 playbackId）、再写气泡 anim:false，记忆记 action 且正文剥标记', async () => {
     const ws = tempWorkspace();

@@ -145,6 +145,7 @@ export function createCardRuntime(rt: PetRuntime) {
       pendingSquash: pendingSquashRef,
       petId: cfg.id,
       report: reportPlayback,
+      chatBubbleVisible: bubbles.isWhisperVisible,
       setCuePlayback: actions.setCuePlayback,
       videoA: () => videoARef.current,
       videoB: () => videoBRef.current,

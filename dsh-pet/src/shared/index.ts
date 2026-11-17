@@ -27,6 +27,7 @@ export * from './state.ts';
 export * from './env-icon.ts';
 export * from './env-view.ts';
 export * from './bubble-hold.ts';
+export * from './chat-animation.ts';
 export * from './display-hotkey.ts';
 export * from './sleep-hotkey.ts';
 export * from './todo/index.ts';

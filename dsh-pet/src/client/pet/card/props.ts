@@ -41,7 +41,7 @@ export interface PetCardProps {
   /** 说话指令变化次数。 */
   sayTick: number;
   /** 本宠物的点播指令：name 与 url 恰好一个；facing 未指定时保持当前朝向。 */
-  animCue?: { name?: string; url?: string; seq: number; playbackId?: string; facing?: PetFacing };
+  animCue?: { name?: string; url?: string; seq: number; playbackId?: string; facing?: PetFacing; chatHold?: true };
   /** 点播指令变化次数。 */
   animCueTick: number;
   /** 本宠物的位置指令：x/y 是宠物中心的归一化坐标，duration 仅 line 模式有效。 */

@@ -15,6 +15,7 @@ import type { Animations } from '../../../shared/types.ts';
 
 /** 假 video：只实现动画链用到的成员。 */
 class FakeVideo {
+  currentTime = 0;
   loop = true;
   muted = false;
   autoplay = false;
@@ -228,6 +229,61 @@ describe('createOwnAnimation —— 换源与回执', () => {
 });
 
 describe('createOwnAnimation —— 播完与冻结', () => {
+  test('旧片结束与新展示加载重叠时，不清掉新展示或把新动作提前结束', async () => {
+    const h = harness({ now: () => 3000, chatBubbleVisible: () => true });
+    h.anim.switchTo('idle1', true, 'old');
+    h.loader.requests[0].handlers.onObjectUrl('blob:old');
+    h.videoB.fire('loadeddata');
+    await Promise.resolve();
+    h.setCurrentAnim('idle2');
+    h.anim.setChatHold?.({ name: 'idle2', playbackId: 'new', startedAt: 0 });
+    h.anim.switchTo('idle2', true, 'new');
+    assert.deepEqual(h.anim.handleEnded({ currentTarget: h.videoB } as unknown as Event), { kind: 'ignore' });
+    h.loader.requests[1].handlers.onObjectUrl('blob:new');
+    h.videoA.fire('loadeddata');
+    await Promise.resolve();
+    assert.equal(h.anim.isChatHolding?.(), true);
+    assert.deepEqual(h.anim.handleEnded({ currentTarget: h.videoA } as unknown as Event), { kind: 'ignore' });
+    assert.equal(
+      h.reports.some((r) => r.id === 'new' && r.status === 'ended'),
+      false,
+    );
+  });
+  test('聊天短片结束会续播画面，保持一次播放回执；收起后完成并交回待机', async () => {
+    let now = 0,
+      bubble = true;
+    const h = harness({ now: () => now, chatBubbleVisible: () => bubble });
+    h.setCurrentAnim('idle1');
+    h.anim.setChatHold?.({ name: 'idle1', playbackId: 'pb-chat', startedAt: 0 });
+    h.anim.switchTo('idle1', true, 'pb-chat');
+    h.loader.requests[0].handlers.onObjectUrl('blob:1');
+    h.videoB.fire('loadeddata');
+    await Promise.resolve();
+    now = 2300;
+    h.videoB.currentTime = 2.3;
+    assert.deepEqual(h.anim.handleEnded({ currentTarget: h.videoB } as unknown as Event), { kind: 'ignore' });
+    assert.equal(h.videoB.currentTime, 0);
+    assert.equal(h.videoB.playCalls, 2);
+    assert.equal(h.reports.filter((r) => r.status === 'playing').length, 1);
+    assert.equal(
+      h.reports.some((r) => r.status === 'ended'),
+      false,
+    );
+    now = 12_000;
+    bubble = false;
+    assert.deepEqual(h.anim.handleEnded({ currentTarget: h.videoB } as unknown as Event), { kind: 'event-done' });
+    assert.equal(h.reports.filter((r) => r.status === 'ended').length, 1);
+  });
+  test('新动作与冻结会终止聊天展示，不会把旧短片接回来', () => {
+    const h = harness({ now: () => 2300, chatBubbleVisible: () => true });
+    h.setCurrentAnim('idle1');
+    h.anim.setChatHold?.({ name: 'idle1', playbackId: 'pb-chat', startedAt: 0 });
+    h.anim.switchTo('idle2', true, 'pb-new');
+    assert.equal(h.anim.isChatHolding?.(), false);
+    h.anim.setChatHold?.({ name: 'idle2', playbackId: 'pb-new', startedAt: 0 });
+    h.anim.setFrozen(true);
+    assert.equal(h.anim.isChatHolding?.(), false);
+  });
   test('播完先回 ended，再按动画池给判定', () => {
     const h = harness();
     h.anim.switchTo('idle1', true, 'pb-1');

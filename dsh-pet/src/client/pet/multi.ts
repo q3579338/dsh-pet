@@ -186,7 +186,10 @@ export function createPetMulti(
     const sayRef = useRef<Record<string, SayCue & { seq: number }>>({});
     const [animCueTick, setAnimCueTick] = useState(0);
     const animCueRef = useRef<
-      Record<string, { name?: string; url?: string; seq: number; playbackId?: string; facing?: PetFacing }>
+      Record<
+        string,
+        { name?: string; url?: string; seq: number; playbackId?: string; facing?: PetFacing; chatHold?: true }
+      >
     >({});
     const [posCueTick, setPosCueTick] = useState(0);
     const posCueRef = useRef<
@@ -283,6 +286,7 @@ export function createPetMulti(
               url: hit.url,
               playbackId: hit.playbackId,
               facing: hit.facing,
+              chatHold: hit.chatHold,
               seq: (animCueRef.current[petId]?.seq ?? 0) + 1,
             };
             setAnimCueTick((t) => t + 1);

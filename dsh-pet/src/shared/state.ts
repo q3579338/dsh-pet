@@ -337,9 +337,9 @@ export type PetFacing = 'left' | 'right';
  *  facing 是调用方显式指定的朝向：undefined = 没指定，不动朝向，保持当前朝向——不是回落 left。 */
 export function readAnim(
   leaf: StateLeaf,
-): { name?: string; url?: string; playbackId?: string; facing?: PetFacing } | null {
+): { name?: string; url?: string; playbackId?: string; facing?: PetFacing; chatHold?: true } | null {
   if (!leaf.data || typeof leaf.data !== 'object') return null;
-  const d = leaf.data as { name?: unknown; url?: unknown; playbackId?: unknown; facing?: unknown };
+  const d = leaf.data as { name?: unknown; url?: unknown; playbackId?: unknown; facing?: unknown; chatHold?: unknown };
   const name = typeof d.name === 'string' && d.name ? d.name : undefined;
   const url = typeof d.url === 'string' && d.url ? d.url : undefined;
   // 两个都缺席 = 形状非法（宿主写端保证恰好一个，这里不替它猜）
@@ -350,6 +350,7 @@ export function readAnim(
     playbackId: typeof d.playbackId === 'string' && d.playbackId ? d.playbackId : undefined,
     // 朝向：只认两个字面量，其余（含缺省、老宿主、脏值）一律 undefined = 不动朝向
     facing: d.facing === 'left' || d.facing === 'right' ? d.facing : undefined,
+    ...(d.chatHold === true ? { chatHold: true as const } : {}),
   };
 }
 

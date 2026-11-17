@@ -77,6 +77,7 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       if (balanceManual || percent !== undefined || balance.shape === 'custom') hub.bubbles.showBalance();
       if (!cfg.balanceEnabled) return; // 档位动画只属于启用余额的宠物。
       if (percent === undefined) return; // 当前数据源没有百分比语义，不触发档位动画。
+      if (!balanceManual && hub.ownAnim.isChatHolding?.()) return;
       const pool = hub.anims().events?.balance;
       if (!pool || pool.length === 0) {
         console.error('[dsh-pet] 配置缺少 animations.events.balance，无法播放余额事件动画');
@@ -169,6 +170,7 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       const terminal = workStatus.state === 'success' || workStatus.state === 'error';
       // 只在状态变化时点亮或收起气泡：同状态后续 tick 不重新点亮已自动收起的终态气泡。
       if (stateChanged) hub.bubbles.lightWork(terminal);
+      if (hub.ownAnim.isChatHolding?.()) return;
       // 循环语义：终态播一遍；非终态单候选无限循环，多候选播一遍后由播完判定轮换。
       const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
       card.actions.setOnce(terminal || rotating);
@@ -180,6 +182,7 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       if (!say || say.seq === prevSayRef.current) return;
       prevSayRef.current = say.seq;
       if (say.kind === 'clear') {
+        hub.ownAnim.setChatHold?.(null);
         hub.bubbles.clearWhisper();
         return;
       }
@@ -193,6 +196,11 @@ export function createCueEffects(rt: CueEffectsRuntime) {
       const card = hub.card;
       if (!animCue || animCue.seq === prevAnimRef.current) return;
       prevAnimRef.current = animCue.seq;
+      hub.ownAnim.setChatHold?.(
+        animCue.chatHold && animCue.name && animCue.playbackId
+          ? { name: animCue.name, playbackId: animCue.playbackId, startedAt: Date.now() }
+          : null,
+      );
       // facing 必须在换源前落地，并同步镜像 ref：换源在 onReady 里读它。
       // 未传 facing 时保持当前朝向，不回落 left。
       const explicitFacing = animCue.facing !== undefined;

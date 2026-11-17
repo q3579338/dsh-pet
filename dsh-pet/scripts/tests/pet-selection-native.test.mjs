@@ -99,7 +99,14 @@ test(
       if (process.env.DSH_PET_SELECTION_EVIDENCE) {
         const evidence = resolve(process.env.DSH_PET_SELECTION_EVIDENCE);
         await mkdir(evidence, { recursive: true });
-        for (const name of ['switch.json', 'restart.json', 'pet-selection-390.png', 'pet-target-chat.png']) {
+        for (const name of [
+          'switch.json',
+          'restart.json',
+          'pet-selection-390.png',
+          'pet-target-chat.png',
+          'body-展示天圆地方.png',
+          'body-展示非洲之心.png',
+        ]) {
           const bytes = await readFile(join(run, name)).catch(() => null);
           if (bytes) await writeFile(join(evidence, name), bytes);
         }

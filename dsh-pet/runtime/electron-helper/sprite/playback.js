@@ -10,6 +10,11 @@
 Object.assign(PetSprite.prototype, {
   switchTo(next, nextOnce, playbackId, url) {
     if (!next) return;
+    if (
+      this.chatActionHold &&
+      (this.chatActionHold.name !== next || (playbackId && this.chatActionHold.playbackId !== playbackId))
+    )
+      this.chatActionHold = null;
     // 「当前在播哪一段」只在这里写：ended 分流、回空闲补丁、随机链避重都读它。
     // 交给调用方维护时 switchTo(x, false) 会留下过期值，events.js 判「是不是工作动画」就永远不成立。
     this.anim = next;
@@ -112,6 +117,13 @@ Object.assign(PetSprite.prototype, {
   restartLoop(el) {
     el.currentTime = 0;
     void el.play().catch(() => {});
+  },
+
+  chatActionHolding() {
+    return (
+      !!this.chatActionHold &&
+      S.keepChatAnimation(this.chatActionHold, this.anim, this.playback, this.whisperOn === true)
+    );
   },
 
   playOnce(name, playbackId, url) {
@@ -286,6 +298,14 @@ Object.assign(PetSprite.prototype, {
   },
 
   handleEnded() {
+    // 旧前台恰好播完时，新动作可能还在加载；不能让旧 ended 清掉新展示或抢回随机链。
+    if (this.pending) return;
+    if (!this.sleeping && !this.frozen && !this.dragState.active && this.chatActionHolding()) {
+      this.restartLoop(this.front === 0 ? this.videoA : this.videoB);
+      return;
+    }
+    const wasChatAction = !!this.chatActionHold;
+    this.chatActionHold = null;
     // 播放回执：前台视频真的播完了 → 如实回 ended。放在拖拽守卫之前——「播完了」是既成事实，
     // 拖拽守卫管的是动画链怎么推进，不该影响回执的准确性。
     if (this.playback) {
@@ -362,6 +382,7 @@ Object.assign(PetSprite.prototype, {
       if (animations.idle.length) this.playOnce(S.pick(animations.idle, this.anim));
       return;
     }
+    if (wasChatAction && this.resumeWorkStatusAnim()) return;
     this.playIdle();
   },
 

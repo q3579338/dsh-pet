@@ -97,6 +97,7 @@ PetSprite.prototype.onWorkTick = function onWorkTick(snapshot, tick) {
   if (this.sleeping) return;
   if (stateChanged && configuredText && this.workText === configuredText)
     S.speakDesktopWorkStatus(state, configuredText);
+  if (this.chatActionHolding?.()) return;
   // 循环语义：终态播一遍回 idle；非终态多候选档位播一遍 → ended 轮换到下一候选；
   // 非终态单候选档位无限循环。
   const rotating = !terminal && Array.isArray(slot) && slot.length > 1;
@@ -176,6 +177,7 @@ PetSprite.prototype.applyWhisperHold = function applyWhisperHold(event) {
 // 收起说话气泡（POST /bubble/clear 的落点）。只动气泡：正在播的动画、余额气泡、
 // 工作状态气泡都不碰——气泡与动作是两把锁、分别释放。与浏览器端 clearWhisperBubble 同一语义。
 PetSprite.prototype.clearWhisper = function clearWhisper() {
+  this.chatActionHold = null;
   this.whisperText = '';
   this.whisperView = null;
   this.whisperImage = '';
@@ -262,6 +264,7 @@ PetSprite.prototype.showBalanceNow = function showBalanceNow(state, manual) {
   if (this.sleeping) return;
   if (!this.pet.balanceEnabled) return;
   if (p === undefined) return;
+  if (!manual && this.chatActionHolding?.()) return;
   const pool = this.animations.events?.balance;
   if (!pool || pool.length === 0) {
     console.error('[dsh-pet] 配置缺少 animations.events.balance，无法播放余额事件动画');
@@ -408,6 +411,10 @@ function applyAnimLeaf(petId, leaf) {
   if (!hit) return;
   for (const s of sprites) {
     if (s.pet.id !== petId) continue;
+    s.chatActionHold =
+      hit.chatHold && hit.name && hit.playbackId
+        ? { name: hit.name, playbackId: hit.playbackId, startedAt: Date.now() }
+        : null;
     const explicitFacing = hit.facing !== undefined;
     if (explicitFacing) s.facing = hit.facing; // 必须在换源前：switchTo 里按它贴 scaleX(-1)
     if (hit.url !== undefined) s.playUrlOnce(hit.url, hit.playbackId);

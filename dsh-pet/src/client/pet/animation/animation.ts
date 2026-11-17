@@ -14,6 +14,7 @@ import type { WorkStatusSnapshot } from '../../../shared/work-status.ts';
 import { createAssetLoader, type AssetLoader } from './asset-loader.ts';
 import { animationAssetUrl } from './assets.ts';
 import { thumbExt } from './media.ts';
+import { keepChatAnimation, type ChatAnimationHold } from '../../../shared/chat-animation.ts';
 
 export type { EndedCue, FreezeCue };
 
@@ -65,10 +66,18 @@ export interface OwnAnimationDeps {
   initiallyFrozen: boolean;
   /** 素材加载器；缺省用带超时的默认实现。 */
   loader?: AssetLoader;
+  /** 聊天气泡或朗读仍在展示；缺省只采用短片最小展示时间。 */
+  chatBubbleVisible?: () => boolean;
+  /** 隔离测试时钟。 */
+  now?: () => number;
 }
 
 /** 动画链对外能力。 */
 export interface OwnAnimation {
+  /** 聊天动作保留展示；普通点播传 null 清除。 */
+  setChatHold?: (hold: ChatAnimationHold | null) => void;
+  /** 自动联动让位给正在展示的聊天动作。 */
+  isChatHolding?: () => boolean;
   /** 换源播放；`cuePlaybackId` 非空表示这是一次第三方点播，要回执。 */
   switchTo: (next: string, once: boolean, cuePlaybackId: string | null) => void;
   /** 前台播完的判定；回执在这里上报，React 状态由组件按 cue 改。 */
@@ -106,6 +115,15 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   let cueUrl: string | null = null;
   /** 正在播的点播编号。 */
   let playing: string | null = null;
+  let chatHold: ChatAnimationHold | null = null;
+  const isChatHolding = (): boolean =>
+    keepChatAnimation(
+      chatHold,
+      deps.currentAnim(),
+      playing,
+      deps.chatBubbleVisible?.() === true,
+      deps.now?.() ?? Date.now(),
+    );
   /** 冻结标志：只挡自动来源，显式指令照常。 */
   let frozen = deps.initiallyFrozen;
   /** 两个槽位各自的 blob 地址，换源时先释放旧的。 */
@@ -126,6 +144,8 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   };
 
   const switchTo = (next: string, nextOnce: boolean, cuePlaybackId: string | null): void => {
+    if (chatHold && (next !== chatHold.name || (cuePlaybackId && cuePlaybackId !== chatHold.playbackId)))
+      chatHold = null;
     // 一次性消费点播编号：清空会再跑一趟 effect，那一趟落入防重分支。
     if (cuePlaybackId !== null) deps.clearCuePlayback();
     // url 交接位同样一次性取走，且必须早于任何 return：否则防重分支提前返回时，
@@ -233,6 +253,17 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     // 只认前台元素的 ended：后台即便有残留事件也丢弃，防止掐断当前动画。
     const endedOn = event === undefined ? null : (event.currentTarget as HTMLVideoElement | null);
     if (endedOn !== null && !endedOn.classList.contains('is-front')) return { kind: 'ignore' };
+    if (pending !== null) return { kind: 'ignore' };
+    if (!frozen && !deps.isDragging() && isChatHolding()) {
+      const el = frontVideo();
+      if (el) {
+        el.currentTime = 0;
+        void el.play().catch(() => {});
+        return { kind: 'ignore' };
+      }
+    }
+    const wasChatAction = chatHold !== null;
+    chatHold = null;
     // 回执放在拖拽守卫之前：「播完」是既成事实，不该受动画链推进逻辑影响。
     const done = playing;
     if (done !== null) {
@@ -242,6 +273,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
     if (deps.isDragging()) return { kind: 'ignore' };
     // 冻结时不推进：下面每条分支都会按当前工作状态换源，effect 的门禁拦不住。
     if (frozen) return { kind: 'ignore' };
+    if (wasChatAction) return { kind: 'event-done' };
     const cue = decideEndedCue({
       animations: deps.cfg().animations,
       current: deps.currentAnim(),
@@ -259,6 +291,10 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
   };
 
   return {
+    setChatHold: (hold) => {
+      chatHold = hold;
+    },
+    isChatHolding,
     switchTo,
     handleEnded,
     stopLoopingFront: () => {
@@ -274,6 +310,7 @@ export function createOwnAnimation(deps: OwnAnimationDeps): OwnAnimation {
       if (frozen === next) return null;
       frozen = next;
       if (next) {
+        chatHold = null;
         frontVideo()?.pause();
         // 冻结打断了正在播的点播：解冻不会接回来，所以是 cancelled 而不是暂停。
         if (playing !== null) reportOnce(playing, 'cancelled', REASON_FROZEN);

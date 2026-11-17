@@ -454,7 +454,8 @@ export function createChatMemory(deps: ChatMemoryInput) {
       if (generated.text !== '') {
         state.writePet(petId, 'say', {
           text: generated.text,
-          ...(generated.image ? { image: generated.image } : {}),
+          // 已由本体表演的回复只弹文字；配图仍留在聊天记录，避免大图遮住正在展示的角色。
+          ...(generated.image && generated.action === undefined ? { image: generated.image } : {}),
           // 带动作时显式关掉碎碎念动画：气泡照弹，但不把刚点播的动作顶掉
           ...(generated.action !== undefined ? { anim: false } : {}),
           ...(replyVoiceTo ? { voiceTo: replyVoiceTo } : {}),
