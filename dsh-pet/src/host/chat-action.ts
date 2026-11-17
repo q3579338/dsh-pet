@@ -78,16 +78,16 @@ export function extractChatAction(text: string, names: readonly string[]): { tex
 
 /** 流式语音只交付正文；跨块的动作/配图标记先暂存，绝不把控制词念出来。 */
 export function visibleChatText(raw: string, complete = false): string {
-  let clean = raw.replace(/\[(?:动作|图)[:：][^\]\n]*(?:\]|$)/gu, '');
-  if (!complete) {
+  let clean = raw.replace(/\[(?:动作|图)[:：][^\]]*(?:\]|$)/gu, '');
+  {
     for (const prefix of ['[动作:', '[动作：', '[图:', '[图：']) {
-      for (let length = 1; length < prefix.length; length++) {
+      for (let length = complete ? 2 : 1; length < prefix.length; length++) {
         if (clean.endsWith(prefix.slice(0, length))) {
           clean = clean.slice(0, -length);
-          return clean.trimEnd();
+          return clean.trim();
         }
       }
     }
   }
-  return clean.trimEnd();
+  return clean.trim();
 }

@@ -1,6 +1,6 @@
 /** 将两家的即时语音送回已有桌宠气泡与播放回执链路；不合成第二份声音。 */
 import { readVoicePresentationFrame } from '../../shared/voice-presentation.ts';
-import { actionInstruction, extractChatAction } from '../chat-action.ts';
+import { actionInstruction, extractChatAction, visibleChatText } from '../chat-action.ts';
 import { playChatAction } from '../chat-presentation.ts';
 import type { PollStateStore } from '../state.ts';
 import type { PlaybackStore } from '../playback.ts';
@@ -158,7 +158,7 @@ export function createVoicePresentation(deps: {
       const parsed = extractChatAction(frame.text, selected.actions);
       if (deps.mode === 'model' && frame.complete && parsed.action)
         playChatAction(deps.state, deps.playback, deps.petId, parsed.action);
-      pending = parsed.text.replace(/\[动作[:：][^\]]*$/u, '').trim();
+      pending = visibleChatText(frame.text, frame.complete);
       if (frame.complete || !previous) {
         clearTimeout(timer);
         if (frame.complete && !pending) clear();

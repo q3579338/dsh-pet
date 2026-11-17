@@ -33,6 +33,17 @@ function captureFetch(response: unknown): { bodies: string[]; restore: () => voi
 }
 
 describe('sendChat 请求体', () => {
+  test('非JSON的413响应仍提示图片超限，不掩盖成响应非法', async () => {
+    const original = globalThis.fetch;
+    try {
+      globalThis.fetch = (async () => new Response('Request Entity Too Large', { status: 413 })) as typeof fetch;
+      const result = await sendChat('http://127.0.0.1/chat', '看图');
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.match(result.message ?? '', /图片或消息过大/u);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
   test('正文超限和窗口失效显示明确原因，不把本机错误藏成bad-request', async () => {
     const original = globalThis.fetch;
     try {
