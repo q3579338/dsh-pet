@@ -8,7 +8,10 @@ const electron = require('electron');
 const { app } = electron,
   RealWindow = electron.BrowserWindow;
 const run = process.env.FISH_TEST_RUN;
-const report = { offscreen: true, shown: false, nativeCalls: 0 };
+const source = process.env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? 'codex' : 'workbuddy';
+const model = source === 'codex' ? 'gpt-6-luna' : 'deepseek-v4-flash';
+const label = source === 'codex' ? 'Codex' : 'WorkBuddy';
+const report = { source, offscreen: true, shown: false, nativeCalls: 0 };
 report.codexDictationCalls = 0;
 report.codexChildren = 0;
 report.workbuddyAsrChildren = 0;
@@ -75,10 +78,10 @@ const guard = setTimeout(() => {
       await fetch(origin + '/standalone-ai/settings', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ protocol: 'workbuddy', model: 'deepseek-v4-flash', timeoutMs: 60000 }),
+        body: JSON.stringify({ protocol: source, model, timeoutMs: 60000 }),
       })
     ).json();
-    assert.equal(settings.protocol, 'workbuddy');
+    assert.equal(settings.protocol, source);
     const remembered = await (
       await fetch(origin + '/dsh-pet-7340/chat/long-term-memory?pet=main', {
         method: 'POST',
@@ -91,7 +94,10 @@ const guard = setTimeout(() => {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        text: process.env.DSH_PET_ACTION_PROBE === '1' ? '你吃个西瓜给我看。' : '测试。',
+        text:
+          process.env.DSH_PET_ACTION_PROBE === '1'
+            ? process.env.DSH_PET_ACTION_TEXT || '吃一块西瓜吃一块西瓜。'
+            : '测试。',
         voice: 'windows/zh-CN',
       }),
     });
@@ -101,7 +107,7 @@ const guard = setTimeout(() => {
       await fetch(origin + '/dsh-pet-7340/voice/hear', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ audio: b64, provider: 'codex' }),
+        body: JSON.stringify({ audio: b64, provider: source === 'codex' ? 'workbuddy' : 'codex' }),
       })
     ).json();
     assert.equal(wrongSource.ok, false);
@@ -109,20 +115,22 @@ const guard = setTimeout(() => {
       await fetch(origin + '/dsh-pet-7340/voice/hear', {
         method: 'POST',
         headers,
-        body: JSON.stringify({ audio: b64, provider: 'workbuddy' }),
+        body: JSON.stringify({ audio: b64, provider: source }),
       })
     ).json();
     assert.equal(recognized.ok, true);
     assert.match(recognized.text, process.env.DSH_PET_ACTION_PROBE === '1' ? /西瓜/ : /测试/);
     report.workbuddyUploadedRecognition = recognized.text;
-    const wrongCall = await (
-      await fetch(origin + '/dsh-pet-7340/voice/live/start', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ petId: 'main', sdp: 'v=0\ntest', styleId: 'natural' }),
-      })
-    ).json();
-    assert.equal(wrongCall.ok, false);
+    if (source === 'workbuddy') {
+      const wrongCall = await (
+        await fetch(origin + '/dsh-pet-7340/voice/live/start', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ petId: 'main', sdp: 'v=0\ntest', styleId: 'natural' }),
+        })
+      ).json();
+      assert.equal(wrongCall.ok, false);
+    }
     app.emit('codex-bigfish:chat');
     let chat;
     for (let i = 0; i < 100; i++) {
@@ -148,7 +156,7 @@ const guard = setTimeout(() => {
       const nativeFetch=window.fetch;window.fetch=async(url,init)=>{
         if(String(url).includes('/voice/conversation/events?')){
           const response=await nativeFetch(url,init);
-          void(async()=>{const reader=response.clone().body.getReader(),decoder=new TextDecoder();let pending='';for(;;){const part=await reader.read();if(part.done)break;pending+=decoder.decode(part.value,{stream:true});let at;while((at=pending.indexOf('\\n'))>=0){const event=JSON.parse(pending.slice(0,at));pending=pending.slice(at+1);if(event.type==='reply'){__wb.turn++;__wb.turns.push({id:__wb.turn,text:''});}const turn=__wb.turns.at(-1);if(turn&&event.type==='text')turn.text+=event.text;if(turn&&event.type==='done')turn.complete=true;}}})().catch(()=>{});
+          void(async()=>{const reader=response.clone().body.getReader(),decoder=new TextDecoder();let pending='';for(;;){const part=await reader.read();if(part.done)break;pending+=decoder.decode(part.value,{stream:true});let at;while((at=pending.indexOf('\\n'))>=0){const event=JSON.parse(pending.slice(0,at));pending=pending.slice(at+1);if(event.type==='reply'){__wb.turn++;__wb.turns.push({id:__wb.turn,text:''});}const turn=__wb.turns.at(-1);if(turn&&event.type==='text')turn.text+=event.text;if(turn&&event.type==='done'){turn.complete=true;if(event.text!==undefined)turn.text=event.text;}}}})().catch(()=>{});
           return response;
         }
 
@@ -194,7 +202,10 @@ const guard = setTimeout(() => {
       );
       await wait(80);
       await js("document.querySelector('.pet-chat-live-button').click()");
-      await until("document.querySelector('.pet-chat-live-status')?.textContent.includes('WorkBuddy ·')", 'call ready');
+      await until(
+        `document.querySelector('.pet-chat-live-status')?.textContent.includes(${JSON.stringify(label + ' ·')})`,
+        'call ready',
+      );
     };
     const stop = async () => {
       await js("document.querySelector('.pet-chat-live-button').click()");
@@ -203,6 +214,11 @@ const guard = setTimeout(() => {
       const state = await (await fetch(origin + '/dsh-pet-7340/state', { headers })).json();
       assert.equal(state.sections.voiceSession.data.active, false);
     };
+    const balance = await (
+      await fetch(origin + '/dsh-pet-7340/balance?pet=main&surface=any', { method: 'POST', headers, body: '{}' })
+    ).json();
+    report.balancePrimed = balance.ok === true;
+    assert.equal(report.balancePrimed, true);
     await start('starbell');
     await js('__wbSpeak()');
     await until('__wb.metrics.length>=1', 'first Starbell reply');
@@ -248,11 +264,13 @@ const guard = setTimeout(() => {
       `({metrics:__wb.metrics,models:__wb.models,recognized:__wb.recognized,voiceRequests:__wb.voiceRequests,peers:__wb.peers,allTracksEnded:__wb.tracks.every(track=>track.readyState==='ended'),draft:document.querySelector('textarea.pet-chat-input').value,micEnabled:!document.querySelector('.pet-chat-mic').disabled})`,
     );
     assert.equal(report.nativeCalls, 0);
-    assert.equal(report.codexDictationCalls, 0);
-    assert.equal(report.codexChildren, 0);
-    assert.ok(report.workbuddyAsrChildren >= 6);
+    assert.equal(report.codexDictationCalls, source === 'codex' ? 1 : 0);
+    if (source === 'workbuddy') assert.equal(report.codexChildren, 0);
+    else assert.ok(report.codexChildren > 0);
+    if (source === 'workbuddy') assert.ok(report.workbuddyAsrChildren >= 6);
+    else assert.equal(report.workbuddyAsrChildren, 0);
     assert.equal(report.live.peers, 0);
-    assert.ok(report.live.models.length >= 5 && report.live.models.every((model) => model === 'deepseek-v4-flash'));
+    assert.ok(report.live.models.length >= 5 && report.live.models.every((value) => value === model));
     assert.ok(
       report.live.recognized.length >= 6 &&
         report.live.recognized.every((row) =>
@@ -285,6 +303,12 @@ const guard = setTimeout(() => {
     const memory = path.join(run, 'home/dsh-pet/memory.json');
     report.memoryUntouched = !fs.existsSync(memory) || fs.readFileSync(memory, 'utf8').trim() === '{}';
     assert.equal(report.memoryUntouched, true);
+    if (source === 'codex')
+      report.miniImageChat = await require('./mini-image-chat.cjs')({
+        windows: () => RealWindow.getAllWindows(),
+        origin,
+      });
+
     // 设置顶部来源选择及真实订阅查询：查询 Codex 草稿时，已保存来源仍保持 WorkBuddy。
     await js("document.querySelector('[data-tab=config]').click()");
     for (let i = 0; i < 100; i++) {
@@ -303,7 +327,7 @@ const guard = setTimeout(() => {
     await until("document.querySelector('#balance-result').dataset.ok==='true'", 'Codex subscription query');
     report.codexBalanceShown = await js("document.querySelector('#balance-result').textContent.includes('Codex')");
     assert.equal(report.codexBalanceShown, true);
-    assert.equal((await (await fetch(origin + '/standalone-ai/settings', { headers })).json()).protocol, 'workbuddy');
+    assert.equal((await (await fetch(origin + '/standalone-ai/settings', { headers })).json()).protocol, source);
     await choose('国内版 WorkBuddy');
     await js("document.querySelector('#balance-btn').click()");
     await until("document.querySelector('#balance-result').dataset.ok==='true'", 'WorkBuddy subscription query');

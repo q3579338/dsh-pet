@@ -5,6 +5,9 @@ import type { StreamingDictation } from './codex/dictation-stream.ts';
 import type { ConversationEvent } from '../../shared/voice-conversation.ts';
 import type { AiRequest } from '../../standalone/ai-transport.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
+import { PollStateStore } from '../state.ts';
+import { PlaybackStore } from '../playback.ts';
+import { createVoicePresentation } from './presentation.ts';
 
 async function fixture(
   memory?: Parameters<typeof createVoiceConversation>[0]['memory'],
@@ -84,11 +87,72 @@ async function fixture(
     change: () => {
       selected = { protocol: 'codex', model: 'other' };
     },
+    unsupported: () => {
+      selected = { protocol: 'unsupported', model: 'other' };
+    },
     disable: () => {
       ready = false;
     },
   };
 }
+
+test('Codex自定义语音用自己的识别和文字模型，动作标记不进入字幕与朗读', async () => {
+  const state = new PollStateStore(),
+    playback = new PlaybackStore();
+  let finish!: (text: string) => void;
+  const requests: AiRequest[] = [];
+  const service = createVoiceConversation({
+    selection: () => ({ protocol: 'codex', model: 'gpt-6-luna' }),
+    prompt: () => '桌宠',
+    activeChanged() {},
+    presentation: (petId) =>
+      createVoicePresentation({
+        petId,
+        state,
+        playback,
+        mode: 'model',
+        settings: () => ({ available: true, actions: ['吃西瓜'] }),
+      }),
+    dictation: async (_partial, _signal, source) => {
+      assert.equal(source, 'codex');
+      const result = new Promise<string>((done) => {
+        finish = done;
+      });
+      return { append() {}, finish: () => result, dispose() {} };
+    },
+    async *stream(model, request) {
+      assert.equal(model, 'gpt-6-luna');
+      requests.push(request);
+      for (const text of ['喜欢呀，', '西瓜甜甜的～', '\n[动', '作:吃', '西瓜]']) yield { text };
+    },
+  });
+  try {
+    const call = await service.start('fish', 'starbell');
+    assert.equal(call.ok, true);
+    if (!call.ok) return;
+    const events = service.events(call.sessionId)[Symbol.asyncIterator]();
+    await events.next();
+    await service.audio(call.sessionId, 1, 0, 'AAECAw==');
+    const finishInput = finish;
+    service.end(call.sessionId, 1);
+    finishInput('你喜欢吃西瓜吗');
+    const rows: ConversationEvent[] = [];
+    for (let i = 0; i < 30; i++) {
+      const row = await events.next();
+      if (row.done) break;
+      const event = JSON.parse(new TextDecoder().decode(row.value)) as ConversationEvent;
+      rows.push(event);
+      if (event.type === 'done') break;
+    }
+    assert.match(requests[0].messages[0].content, /\[动作:名称\]/u);
+    const text = rows.flatMap((row) => (row.type === 'text' ? [row.text] : [])).join('');
+    assert.equal(text, '喜欢呀，西瓜甜甜的～');
+    assert.equal((state.read().pets.fish.anim.data as { name: string }).name, '吃西瓜');
+  } finally {
+    service.dispose();
+    state.cancelAll();
+  }
+});
 test('WorkBuddy 连续语音召回长期事实，只提交实际用户转写，停止后可以重连', async () => {
   const heard: string[] = [];
   const f = await fixture({
@@ -257,12 +321,12 @@ test('闲置识别连接断开后第一句话会重连，保留这一句已采�
     f.service.dispose();
   }
 });
-test('错误音色、非WorkBuddy、另一通占用或取消启动都不会创建伪连接', async () => {
+test('错误音色、不支持来源、另一通占用或取消启动都不会创建伪连接', async () => {
   const f = await fixture();
   assert.equal((await f.service.start('fish', 'sugarbud')).ok, false);
   assert.equal((await f.service.start('fish', 'natural')).ok, false);
   f.service.stop(f.id);
-  f.change();
+  f.unsupported();
   assert.equal((await f.service.start('fish', 'dango')).ok, false);
   f.service.dispose();
 });

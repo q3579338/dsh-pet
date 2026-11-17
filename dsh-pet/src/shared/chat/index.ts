@@ -7,6 +7,7 @@
 export type { ChatDialogMount, ChatDialogOptions } from './dialog.ts';
 export { mountChatDialog } from './dialog.ts';
 export type { EncodedImage } from './encode.ts';
+export { encodeImageFile } from './encode.ts';
 export type { HearHold, HearHoldHooks } from './hear-hold.ts';
 export { createHearHold, isHearHotkey } from './hear-hold.ts';
 export { dragHasFiles, firstImageFile, firstImageFromClipboard, isImageFile } from './image-pick.ts';

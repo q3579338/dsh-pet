@@ -197,6 +197,9 @@ const guard = setTimeout(() => {
       window.__live={tracks:[],peers:[],played:0,requests:0,blobs:[],inputs:0,turns:0,assistantCreated:0,customRequests:[],customPlayed:[],customAudios:[],voiceSamples:{},metrics:[],assistantDoneAt:[],utterances:[],warmRequests:[],finalTexts:[],wire:[]};
       document.addEventListener('pet-custom-voice-play',event=>{const row=__live.currentUtterance;const now=performance.now();__live.metrics.push({...event.detail,...(row?{fromSpeechEndMs:Math.round(now-row.endAt),recognitionMs:row.recognizedAt===undefined?undefined:Math.round(row.recognizedAt-row.endAt),modelToFirstTextMs:row.recognizedAt===undefined?undefined:Math.round(now-event.detail.fromTextMs-row.recognizedAt)}:{})});});
       const originalFetch=window.fetch;window.fetch=async(url,init)=>{
+        // 此夹具固定验收原生控制器；默认自定义音色的真实对话路线由conversation夹具单独验收。
+        if(String(url).endsWith('/voice/conversation/options')){const response=await originalFetch(url,init);const value=await response.json();return new Response(JSON.stringify({...value,conversation:false}),{status:response.status,headers:{'content-type':'application/json'}});}
+
         const voice=(String(url).endsWith('/voice/speak')||String(url).endsWith('/voice/stream'))?JSON.parse(init?.body||'{}').voice:undefined;
         const warm=String(url).endsWith('/voice/warm')?{active:JSON.parse(init?.body||'{}').active,at:performance.now()}:undefined;if(warm)__live.warmRequests.push(warm);
         const queuedAt=performance.now(),turnId=__live.currentAssistantTurnId;const response=await originalFetch(url,init);

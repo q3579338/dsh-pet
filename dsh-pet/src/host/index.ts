@@ -33,6 +33,7 @@ import { ensureWindowsSpeech } from './voice/windows/providers.ts';
 import { ensureCodexSpeech } from './voice/codex/provider.ts';
 import { createLiveVoiceService } from './voice/live/service.ts';
 import { createWorkBuddyDictation } from '../standalone/workbuddy/dictation.ts';
+import { createStreamingDictation } from './voice/codex/dictation-stream.ts';
 import { ensureWorkBuddySpeech } from './voice/workbuddy-provider.ts';
 import { createVoiceConversation } from './voice/conversation.ts';
 import { createVoicePresentation } from './voice/presentation.ts';
@@ -176,8 +177,9 @@ export function apply(ctx: any): void {
 
   let nativeVoiceActive = false,
     workbuddyVoiceActive = false;
-  const voicePresentation = (petId: string) =>
+  const voicePresentation = (petId: string, mode: 'native' | 'model' = 'native') =>
     createVoicePresentation({
+      mode,
       petId,
       state,
       playback,
@@ -228,7 +230,7 @@ export function apply(ctx: any): void {
   const voiceConversation =
     process.env.DSH_PET_CODEX === '1' && voiceAi?.voiceStream
       ? createVoiceConversation({
-          presentation: voicePresentation,
+          presentation: (petId) => voicePresentation(petId, 'model'),
           memory: longTermMemory,
           selection: () => voiceAi.voiceSelection?.(),
           ready: () => voiceAi.isReady(),
@@ -245,7 +247,10 @@ export function apply(ctx: any): void {
           },
           stream: (model, request, signal) => voiceAi.voiceStream!(model, request, signal),
           prepare: (active) => voiceAi.prepareVoice?.(active) ?? Promise.resolve(),
-          dictation: (partial, signal) => createWorkBuddyDictation(userRoot, partial, signal),
+          dictation: (partial, signal, source) =>
+            source === 'codex'
+              ? createStreamingDictation(partial, signal)
+              : createWorkBuddyDictation(userRoot, partial, signal),
           busy: () => nativeVoiceActive,
           activeChanged: (active) => {
             workbuddyVoiceActive = active;

@@ -138,9 +138,10 @@ export function createStandaloneAi(
     voiceSelection: () => ({ protocol: store.current().protocol, model: modelOf() }),
     voiceStream: (model, request, signal) => workBuddyVoiceStream(runtime, model, request, signal),
     prepareVoice: async (active) => {
-      if (active && (!runtime.ready() || store.current().protocol !== 'workbuddy'))
-        throw new WorkBuddyFailure('请先选择 WorkBuddy 模型。');
-      await runtime.workbuddy?.prepareVoice?.(active);
+      if (active && (!runtime.ready() || !['codex', 'workbuddy'].includes(store.current().protocol)))
+        throw new WorkBuddyFailure('请先选择 Codex 或 WorkBuddy 模型。');
+      if (!active || store.current().protocol === 'workbuddy') await runtime.workbuddy?.prepareVoice?.(active);
+      else await runtime.codexConnection?.open();
     },
     listProviders: () => (runtime.ready() ? [{ id: PROVIDER, name: 'Standalone AI' }] : []),
     listModels: async (provider) =>

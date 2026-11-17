@@ -11,6 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { firstSpeechPart } from '../../shared/speech-parts.ts';
 import { generateChat, type ChatMemoryMessage } from '../chat.ts';
 import { chatActionNames } from '../chat-action.ts';
+import { playChatAction } from '../chat-presentation.ts';
 import { currentEnvironment, type EnvironmentFacts } from '../environment.ts';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { composeSystemPrompt, petPersona } from '../persona.ts';
@@ -443,8 +444,7 @@ export function createChatMemory(deps: ChatMemoryInput) {
       });
       // 动作先写：与 POST /anim 同一条写回链路（记录 + anim 叶子），渲染端据此播放并回报执。
       if (generated.action !== undefined) {
-        const record = playback.create(petId, generated.action);
-        state.writePet(petId, 'anim', { name: generated.action, playbackId: record.playbackId });
+        playChatAction(state, playback, petId, generated.action);
       }
       // 回复写进 S（与碎碎念同一个叶子：前端本来就是同一条展示链路）。
       // 该由哪一端念按这只宠物的 display 推：对话请求带的是 surface=any，本来就没有具体的一端可用。

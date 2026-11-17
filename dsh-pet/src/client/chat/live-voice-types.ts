@@ -9,6 +9,7 @@ export interface LiveData {
   pet: string;
 }
 export interface LiveControlOptions {
+  source?: string;
   petId: string;
   changed(state: LiveData): void;
   canStart(): boolean;

@@ -257,15 +257,8 @@ Object.assign(PetSprite.prototype, {
     }
     const shot = await window.petBridge.captureScreen();
     if (!shot) throw new Error('没有取到屏幕画面');
-    return {
-      base64: shot.data,
-      mediaType: shot.mediaType,
-      bytes: shot.bytes,
-      width: shot.width,
-      height: shot.height,
-      resized: true,
-      previewUrl: 'data:' + shot.mediaType + ';base64,' + shot.data,
-    };
+    const bytes = Uint8Array.from(window.atob(shot.data), (char) => char.charCodeAt(0));
+    return S.encodeImageFile(new window.File([bytes], 'capture.jpg', { type: shot.mediaType }));
   },
 
   /** 截图快捷键：弹窗开着就把图塞进当前弹窗，没开就带着图打开；截不到也开弹窗把原因写出来。 */

@@ -108,16 +108,23 @@ function previewOf(source: CanvasImageSource, width: number, height: number): st
  * @returns 载荷与预览；压不进预算时抛错。
  */
 export function encodeCanvas(canvas: HTMLCanvasElement): EncodedImage {
-  const { width, height } = canvas;
-  const previewUrl = previewOf(canvas, width, height);
-  const floor = IMAGE_QUALITIES[IMAGE_QUALITIES.length - 1];
-  for (const quality of IMAGE_QUALITIES) {
-    const dataUrl = canvas.toDataURL('image/jpeg', quality);
-    const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
-    const bytes = attachmentBytes(base64);
-    if (bytes <= IMAGE_MAX_BYTES || quality === floor) {
-      return { base64, mediaType: 'image/jpeg', bytes, width, height, resized: true, previewUrl };
+  const previewUrl = previewOf(canvas, canvas.width, canvas.height);
+  let current =
+    Math.max(canvas.width, canvas.height) > IMAGE_MAX_SIDE
+      ? drawToCanvas(canvas, targetSize(canvas.width, canvas.height))
+      : canvas;
+  for (let step = 0; step < 8; step++) {
+    const { width, height } = current;
+    for (const quality of IMAGE_QUALITIES) {
+      const dataUrl = current.toDataURL('image/jpeg', quality);
+      const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      const bytes = attachmentBytes(base64);
+      if (bytes <= IMAGE_MAX_BYTES) {
+        return { base64, mediaType: 'image/jpeg', bytes, width, height, resized: true, previewUrl };
+      }
     }
+    const side = Math.max(1, Math.floor(Math.max(width, height) * 0.75));
+    current = drawToCanvas(canvas, targetSize(canvas.width, canvas.height, side));
   }
   throw new Error('无法压到预算内');
 }

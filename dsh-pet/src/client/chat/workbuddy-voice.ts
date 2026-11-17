@@ -1,4 +1,4 @@
-/** 使用当前 WorkBuddy 内置模型的连续语音，音色失败只中断这一句，保留文字和麦克风。 */
+/** 使用当前文字对话模型的连续语音，音色失败只中断这一句，保留文字和麦克风。 */
 import { ROUTE_SEGMENT } from '../../shared/constants.ts';
 import { toBase64 } from '../../shared/hear.ts';
 import { setLiveVoiceActive } from '../../shared/voice.ts';
@@ -31,6 +31,7 @@ export function createWorkBuddyVoiceControl(options: LiveControlOptions): {
     reported: boolean;
     speechFailed: boolean;
     model: string;
+    source: string;
   };
   let call: Call | undefined,
     disposed = false;
@@ -92,6 +93,7 @@ export function createWorkBuddyVoiceControl(options: LiveControlOptions): {
       reported: false,
       speechFailed: false,
       model: '',
+      source: options.source ?? 'workbuddy',
     };
     call = current;
     setLiveVoiceActive(true);
@@ -100,10 +102,11 @@ export function createWorkBuddyVoiceControl(options: LiveControlOptions): {
       phase: 'connecting',
       user: '',
       pet: '',
-      message: '正在连接 WorkBuddy 和语音识别，可随时取消…',
+      message: '正在连接' + (current.source === 'codex' ? ' Codex ' : ' WorkBuddy ') + '和语音识别，可随时取消…',
     });
     const relevant = (): boolean => call === current && !current.abort.signal.aborted;
-    const listening = (): string => `WorkBuddy · ${current.model} · ${selection.name}，可以直接说话。`;
+    const listening = (): string =>
+      `${current.source === 'codex' ? 'Codex' : 'WorkBuddy'} · ${current.model} · ${selection.name}，可以直接说话。`;
     const queue = (action: string, value: Record<string, unknown>, bytes = 0): void => {
       current.pending += bytes;
       if (current.pending > 160000) {
@@ -191,8 +194,9 @@ export function createWorkBuddyVoiceControl(options: LiveControlOptions): {
         if (current.sessionId) void post('stop', { sessionId: current.sessionId }, undefined, true).catch(() => {});
         return;
       }
-      if (!current.sessionId || typeof result.model !== 'string') throw new Error('WorkBuddy 语音连接未能完成。');
+      if (!current.sessionId || typeof result.model !== 'string') throw new Error('语音连接未能完成。');
       current.model = result.model;
+      current.source = typeof result.source === 'string' ? result.source : current.source;
       const response = await fetch(
         ROUTE_SEGMENT + '/voice/conversation/events?sessionId=' + encodeURIComponent(current.sessionId),
         { signal: current.abort.signal },
@@ -225,14 +229,17 @@ export function createWorkBuddyVoiceControl(options: LiveControlOptions): {
                 current.firstTextAt = undefined;
                 current.reported = false;
                 current.speech?.begin();
-                paint({ pet: '', message: 'WorkBuddy 正在回答…' });
+                paint({ pet: '', message: (current.source === 'codex' ? 'Codex' : 'WorkBuddy') + ' 正在回答…' });
               }
               if (event.type === 'text') {
                 current.firstTextAt ??= Date.now();
                 paint({ pet: (state.pet + event.text).slice(0, 6000) });
                 current.speech?.append(event.text);
               }
-              if (event.type === 'done') current.speech?.finish(state.pet);
+              if (event.type === 'done') {
+                if (event.text !== undefined) paint({ pet: event.text });
+                current.speech?.finish(event.text ?? state.pet);
+              }
               if (event.type === 'interrupted') current.speech?.interrupt();
               if (event.type === 'model') {
                 current.model = event.model;

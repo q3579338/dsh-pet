@@ -40,6 +40,9 @@ export async function sendChat(baseUrl: string, text: string, attachment?: ChatA
     throw new Error('dsh-pet: 对话响应非法');
   }
   const o = raw as Record<string, unknown>;
+  if (res.status === 413) return { ok: false, reason: 'bad-request', message: '图片或消息过大，请压缩图片后重试。' };
+  if (res.status === 401 || res.status === 403)
+    return { ok: false, reason: 'bad-request', message: '当前对话窗口已失效，请从大肥鱼重新打开对话。' };
   if (o.ok !== true) {
     return {
       ok: false,

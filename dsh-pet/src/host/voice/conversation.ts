@@ -1,6 +1,6 @@
-/** 连续语音：WorkBuddy 自己流式识别 → 当前内置模型 → 浏览器所选真实音色。 */
+/** 连续语音：当前来源自己的识别 → 当前文字对话模型 → 浏览器所选真实音色。 */
 import { randomUUID } from 'node:crypto';
-import { createStreamingDictation, DictationStreamError, type StreamingDictation } from './codex/dictation-stream.ts';
+import { DictationStreamError, type StreamingDictation } from './codex/dictation-stream.ts';
 import { liveVoiceStyle } from '../../shared/live-voice-style.ts';
 import type { ConversationEvent } from '../../shared/voice-conversation.ts';
 import type { AiRequest } from '../../standalone/ai-transport.ts';
@@ -8,6 +8,8 @@ import type { WorkBuddyEvent } from '../../standalone/workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../../standalone/workbuddy/executable.ts';
 import type { LongTermMemory } from '../long-term-memory/service.ts';
 import type { VoicePresentation } from './presentation.ts';
+import { visibleChatText } from '../chat-action.ts';
+import { CodexFailure } from '../../standalone/codex/errors.ts';
 
 /** 宿主仅提供当前模型、角色与实际调用，测试不访问真实账号。 */
 export interface ConversationDependencies {
@@ -20,17 +22,17 @@ export interface ConversationDependencies {
   busy?(): boolean;
   ready?(): boolean;
   prepare?(active: boolean): Promise<void>;
-  dictation?: typeof createStreamingDictation;
+  dictation?: (partial: (text: string) => void, signal: AbortSignal, source?: string) => Promise<StreamingDictation>;
 }
 /** 本地会话编号只用于当前进程，关闭后不保留音频与聊天记录。 */
 export interface VoiceConversationService {
   stopAll(): void;
-  options(): { workbuddy: boolean; model: string; source: string };
+  options(): { workbuddy: boolean; conversation: boolean; model: string; source: string };
   start(
     petId: string,
     styleId: string,
     signal?: AbortSignal,
-  ): Promise<{ ok: true; sessionId: string; model: string } | { ok: false; message: string }>;
+  ): Promise<{ ok: true; sessionId: string; model: string; source: string } | { ok: false; message: string }>;
   events(id: string, signal?: AbortSignal): AsyncIterable<Uint8Array>;
   audio(id: string, utterance: number, sequence: number, audio: string): Promise<void>;
   end(id: string, utterance: number): void;
@@ -47,6 +49,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     id: string;
     petId: string;
     model: string;
+    source: string;
     prompt: string;
     abort: AbortController;
     epoch: number;
@@ -72,6 +75,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
     const selection = deps.selection();
     return {
       workbuddy: selection?.protocol === 'workbuddy',
+      conversation: ['codex', 'workbuddy'].includes(selection?.protocol ?? ''),
       model: selection?.model ?? '',
       source: selection?.protocol ?? '',
     };
@@ -104,7 +108,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   const requireRoom = (id: string): Room => {
     if (!active || active.id !== id || active.abort.signal.aborted) throw new Error('语音会话已结束，请重新开始。');
     const selection = deps.selection();
-    if (selection?.protocol !== 'workbuddy' || selection.model !== active.model) {
+    if (selection?.protocol !== active.source || selection.model !== active.model) {
       release(active);
       throw new Error('连接来源已切换，请重新开始语音。');
     }
@@ -114,11 +118,15 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
   const warm = (room: Room): Promise<StreamingDictation> => {
     if (room.warm) return room.warm;
     let prepared: StreamingDictation | undefined;
-    if (!deps.dictation) throw new WorkBuddyFailure('WorkBuddy 流式识别组件暂不可用。');
+    if (!deps.dictation) throw new WorkBuddyFailure('当前来源的流式识别组件暂不可用。');
     const promise = deps
-      .dictation((text) => {
-        if (room.input?.asr === prepared) emit(room, { type: 'partial', text });
-      }, room.abort.signal)
+      .dictation(
+        (text) => {
+          if (room.input?.asr === prepared) emit(room, { type: 'partial', text });
+        },
+        room.abort.signal,
+        room.source,
+      )
       .then((asr) => {
         if (room.abort.signal.aborted) {
           asr.dispose();
@@ -153,7 +161,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       if (!user || !/[\p{L}\p{N}]/u.test(user)) return;
       const selection = deps.selection();
-      if (selection?.protocol !== 'workbuddy' || selection.model !== room.model)
+      if (selection?.protocol !== room.source || selection.model !== room.model)
         throw new WorkBuddyFailure('模型设置已变化，请结束语音后重新开始。');
       emit(room, { type: 'user', text: user });
       room.presentation?.accept({
@@ -162,16 +170,20 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         turnId: String(input.id),
         text: user,
       });
-      deps.memory?.remember(room.petId, user, 'workbuddy-voice');
+      deps.memory?.remember(room.petId, user, room.source === 'codex' ? 'codex-voice' : 'workbuddy-voice');
       const abort = new AbortController();
       room.reply = abort;
       emit(room, { type: 'reply' });
-      let answer = '';
+      let answer = '',
+        visible = '';
       for await (const event of deps.stream(
         room.model,
         {
           system: room.prompt + (deps.memory?.context(room.petId, user) ?? ''),
-          messages: [...room.history, { role: 'user', content: user }],
+          messages: [
+            ...room.history,
+            { role: 'user', content: user + (room.presentation?.modelInstruction?.() ?? '') },
+          ],
         },
         AbortSignal.any([room.abort.signal, abort.signal]),
       )) {
@@ -180,7 +192,12 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         if (event.text) {
           answer += event.text;
           if (answer.length > 4000) throw new WorkBuddyFailure('回复太长，请换个简短问题。');
-          emit(room, { type: 'text', text: event.text });
+          const clean = visibleChatText(answer);
+          if (clean.startsWith(visible)) {
+            const delta = clean.slice(visible.length);
+            visible = clean;
+            if (delta) emit(room, { type: 'text', text: delta });
+          }
           room.presentation?.accept({
             sequence: ++room.presentationSequence,
             type: 'assistant',
@@ -189,7 +206,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
           });
         }
       }
-      if (!answer.trim()) throw new WorkBuddyFailure('DeepSeek 暂时没有回复，请继续说话重试。');
+      if (!answer.trim()) throw new WorkBuddyFailure('当前模型暂时没有回复，请继续说话重试。');
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       room.history.push({ role: 'user', content: user }, { role: 'assistant', content: answer });
       while (room.history.length > 12 || room.history.reduce((n, message) => n + message.content.length, 0) > 8000)
@@ -202,7 +219,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         text: answer,
         complete: true,
       });
-      emit(room, { type: 'done' });
+      emit(room, { type: 'done', text: visibleChatText(answer, true) });
     } catch (error) {
       if (room.abort.signal.aborted || input.epoch !== room.epoch) return;
       room.reply = undefined;
@@ -216,7 +233,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         type: 'error',
         fatal: false,
         message:
-          error instanceof WorkBuddyFailure || error instanceof DictationStreamError
+          error instanceof WorkBuddyFailure || error instanceof DictationStreamError || error instanceof CodexFailure
             ? error.message
             : '这一句暂时没有成功，请继续说话重试。',
       });
@@ -234,9 +251,11 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
       const selected = options(),
         prompt = deps.prompt(petId),
         style = liveVoiceStyle(styleId);
-      if (disposed || !selected.workbuddy || !selected.model)
-        return { ok: false, message: '请先在模型连接中选择国内版 WorkBuddy。' };
-      if (deps.ready?.() === false) return { ok: false, message: '请先启用并保存 WorkBuddy 模型连接，再开始语音。' };
+      const label = selected.source === 'codex' ? 'Codex' : 'WorkBuddy';
+      if (disposed || !selected.conversation || !selected.model)
+        return { ok: false, message: '请先在模型连接中选择 Codex 或国内版 WorkBuddy。' };
+      if (deps.ready?.() === false)
+        return { ok: false, message: '请先启用并保存 ' + label + ' 模型连接，再开始语音。' };
       if (!prompt || !style?.synthesisVoice) return { ok: false, message: '请选择桌宠和自定义音色。' };
       if (active || deps.busy?.()) return { ok: false, message: '已有即时语音正在连接或聊天，请先结束。' };
       const presentation = deps.presentation?.(petId);
@@ -244,6 +263,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
         id: randomUUID(),
         petId,
         model: selected.model,
+        source: selected.source,
         prompt:
           prompt +
           '\n你正在进行实时中文语音闲聊。直接回答刚听到的话，通常一两句、60字以内；第一小句先回答重点。不要输出JSON、Markdown、思考过程、工具调用或舞台动作。不要固定开场白或先说“让我想想”。\n' +
@@ -287,8 +307,8 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
           }
         }, 5000);
         room.timer.unref?.();
-        emit(room, { type: 'ready', model: room.model });
-        return { ok: true, sessionId: room.id, model: room.model };
+        emit(room, { type: 'ready', model: room.model, source: room.source });
+        return { ok: true, sessionId: room.id, model: room.model, source: room.source };
       } catch (error) {
         release(room);
         return {
@@ -296,7 +316,7 @@ export function createVoiceConversation(deps: ConversationDependencies): VoiceCo
           message:
             error instanceof WorkBuddyFailure
               ? error.message
-              : '流式语音识别未能连接，请检查国内版 WorkBuddy 登录和网络后重试。',
+              : '流式语音识别未能连接，请检查' + label + ' 登录和网络后重试。',
         };
       } finally {
         signal?.removeEventListener('abort', cancel);

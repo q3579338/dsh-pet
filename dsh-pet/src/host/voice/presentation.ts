@@ -1,16 +1,18 @@
 /** 将两家的即时语音送回已有桌宠气泡与播放回执链路；不合成第二份声音。 */
 import { readVoicePresentationFrame } from '../../shared/voice-presentation.ts';
-import { extractChatAction } from '../chat-action.ts';
+import { actionInstruction, extractChatAction } from '../chat-action.ts';
+import { playChatAction } from '../chat-presentation.ts';
 import type { PollStateStore } from '../state.ts';
 import type { PlaybackStore } from '../playback.ts';
 
 export interface VoicePresentation {
   instructions(): string;
+  modelInstruction?(): string;
   accept(frame: unknown): boolean;
   dispose(): void;
 }
 
-/** 只从当前角色已有的动作里匹配明确请求，保留否定与用户自述。 */
+/** 从角色已有动作匹配请求和面向桌宠的喜好互动，保留否定与用户自述。 */
 export function requestedVoiceAction(text: string, names: readonly string[]): string | undefined {
   const aliases: Record<string, string[]> = {
     小幅度原地360度旋转展示: ['转圈'],
@@ -31,13 +33,17 @@ export function requestedVoiceAction(text: string, names: readonly string[]): st
         const before = normalized.slice(0, at),
           after = normalized.slice(at + phrase.length);
         if (
-          /(?:别|不要|不能|不许|不想|停止|取消).{0,8}$/u.test(before.replace(/能不能/gu, '')) ||
-          /(?:喜欢|爱|刚|刚刚|已经|正在|昨天|以前|曾经).{0,4}$/u.test(before) ||
+          /(?:别|不要|不能|不许|不想|不喜欢|不爱|停止|取消).{0,8}$/u.test(before.replace(/能不能/gu, '')) ||
+          /(?:刚|刚刚|已经|正在|昨天|以前|曾经).{0,4}$/u.test(before) ||
           /(?:我|他|她|它|我们)[^你请]{0,8}$/u.test(before) ||
           /(?:什么意思|是什么|这个词|这句话)/u.test(after)
         )
           continue;
-        if (normalized === phrase || /(?:你|请|表演|给我|帮我|给.{0,4}看|来|能不能|可以)/u.test(before + after))
+        if (
+          normalized.split(phrase).join('') === '' ||
+          /(?:你|请|表演|给我|帮我|给.{0,4}看|来|能不能|可以)/u.test(before + after) ||
+          (/(?:喜欢|爱)$/u.test(before) && /[吗么嘛呢]/u.test(after))
+        )
           return name;
       }
     }
@@ -50,6 +56,7 @@ export function createVoicePresentation(deps: {
   state: PollStateStore;
   playback: PlaybackStore;
   settings(): { available: boolean; actions: string[] };
+  mode?: 'native' | 'model';
 }): VoicePresentation {
   let disposed = false,
     sequence = 0,
@@ -93,8 +100,14 @@ export function createVoicePresentation(deps: {
     owned = deps.state.read().pets[deps.petId].say.counter;
   };
   return {
+    modelInstruction() {
+      const names = settings().actions;
+      return names.length ? actionInstruction(names) : '';
+    },
     instructions() {
       const names = settings().actions;
+      if (deps.mode === 'model')
+        return '\n你是桌面角色，能通过清单中的现有动画配合对话。动作由模型按语境挑选，与文字对话相同；标记交给程序处理，不属于朗读正文。';
       return (
         '\n【桌宠动画互动】你是屏幕上会动的桌宠角色，你的回答会同步显示在头顶气泡。' +
         (names.length
@@ -128,10 +141,9 @@ export function createVoicePresentation(deps: {
         close(assistantId);
         assistantId = undefined;
         clear();
-        const action = requestedVoiceAction(frame.text, selected.actions);
+        const action = deps.mode === 'model' ? undefined : requestedVoiceAction(frame.text, selected.actions);
         if (action) {
-          const record = deps.playback.create(deps.petId, action);
-          deps.state.writePet(deps.petId, 'anim', { name: action, playbackId: record.playbackId });
+          playChatAction(deps.state, deps.playback, deps.petId, action);
         }
         return true;
       }
@@ -143,9 +155,10 @@ export function createVoicePresentation(deps: {
         previous = '';
         assistantId = frame.turnId;
       }
-      pending = extractChatAction(frame.text, [])
-        .text.replace(/\[动作[:：][^\]]*$/u, '')
-        .trim();
+      const parsed = extractChatAction(frame.text, selected.actions);
+      if (deps.mode === 'model' && frame.complete && parsed.action)
+        playChatAction(deps.state, deps.playback, deps.petId, parsed.action);
+      pending = parsed.text.replace(/\[动作[:：][^\]]*$/u, '').trim();
       if (frame.complete || !previous) {
         clearTimeout(timer);
         if (frame.complete && !pending) clear();

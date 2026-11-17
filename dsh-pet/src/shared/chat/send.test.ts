@@ -33,6 +33,20 @@ function captureFetch(response: unknown): { bodies: string[]; restore: () => voi
 }
 
 describe('sendChat 请求体', () => {
+  test('正文超限和窗口失效显示明确原因，不把本机错误藏成bad-request', async () => {
+    const original = globalThis.fetch;
+    try {
+      for (const status of [413, 403]) {
+        globalThis.fetch = (async () =>
+          new Response(JSON.stringify({ error: '本机拒绝' }), { status })) as typeof fetch;
+        const result = await sendChat('http://127.0.0.1/chat', '看图');
+        assert.equal(result.ok, false);
+        if (!result.ok) assert.match(result.message ?? '', status === 413 ? /图片或消息过大/u : /窗口已失效/u);
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
   test('不带图：只有 text，与加入图片前逐字一致', async () => {
     const captured = captureFetch({ ok: true });
     try {

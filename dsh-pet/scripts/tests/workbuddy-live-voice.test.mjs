@@ -83,8 +83,9 @@ test(
       assert.equal(report.codexBalanceShown, true);
       assert.equal(report.sourceAtTop, true);
       assert.equal(report.longTermMemoryUi, true);
-      assert.equal(report.codexDictationCalls, 0);
-      assert.ok(report.workbuddyAsrChildren >= 6);
+      assert.equal(report.codexDictationCalls, env.DSH_PET_CONVERSATION_SOURCE === 'codex' ? 1 : 0);
+      if (env.DSH_PET_CONVERSATION_SOURCE === 'codex') assert.equal(report.workbuddyAsrChildren, 0);
+      else assert.ok(report.workbuddyAsrChildren >= 6);
       for (const voice of ['starbell-v1', 'sugarbud-v1', 'dango-v1'])
         assert.ok(report.live.metrics.some((row) => row.voice === 'bigfish-cute/' + voice && row.realSpeechEndMs > 0));
     } finally {

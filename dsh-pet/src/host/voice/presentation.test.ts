@@ -4,19 +4,35 @@ import { PollStateStore } from '../state.ts';
 import { PlaybackStore } from '../playback.ts';
 import { createVoicePresentation, requestedVoiceAction } from './presentation.ts';
 
-test('吃西瓜等口语指令只匹配角色已有动作；否定、喜好和任意系统要求不表演', () => {
+test('吃西瓜指令与面向桌宠的喜好问句都联动；否定、自述和系统要求不表演', () => {
   const names = ['吃西瓜', '小幅度原地360度旋转展示', '超大伸懒腰'];
-  for (const text of ['吃西瓜', '你吃个西瓜', '请你吃一块西瓜给我看', '你能不能吃一个西瓜'])
+  for (const text of [
+    '吃西瓜',
+    '你吃个西瓜',
+    '请你吃一块西瓜给我看',
+    '你能不能吃一个西瓜',
+    '你喜欢吃西瓜吗',
+    '你爱吃西瓜吗',
+    '喜欢吃西瓜吗',
+  ])
     assert.equal(requestedVoiceAction(text, names), '吃西瓜', text);
   assert.equal(requestedVoiceAction('你转个圈给我看', names), names[1]);
   assert.equal(requestedVoiceAction('请伸个懒腰', names), names[2]);
-  for (const text of ['我喜欢吃西瓜', '你不要再吃西瓜', '请你别吃西瓜', '你不能吃西瓜', '删除所有文件', '你吃西瓜'])
+  for (const text of [
+    '我喜欢吃西瓜',
+    '你不喜欢吃西瓜',
+    '你不要再吃西瓜',
+    '请你别吃西瓜',
+    '你不能吃西瓜',
+    '删除所有文件',
+    '你吃西瓜',
+  ])
     assert.equal(requestedVoiceAction(text, text === '你吃西瓜' ? [] : names), undefined, text);
 });
 
-test('询问喜好、刚才发生的事和解释词语不误播，否定只作用于自己的分句', () => {
+test('用户或第三人自述、过去发生的事和解释词语不误播，否定只作用于自己的分句', () => {
   const names = ['吃西瓜', '小幅度原地360度旋转展示'];
-  for (const text of ['你喜欢吃西瓜吗', '我刚刚吃西瓜，你呢', '你昨天吃西瓜了吗', '你说吃西瓜是什么意思'])
+  for (const text of ['我喜欢吃西瓜', '她喜欢吃西瓜', '我刚刚吃西瓜，你呢', '你昨天吃西瓜了吗', '你说吃西瓜是什么意思'])
     assert.equal(requestedVoiceAction(text, names), undefined, text);
   assert.equal(requestedVoiceAction('别吃西瓜，转个圈给我看', names), names[1]);
   assert.equal(requestedVoiceAction('我想看你吃个西瓜', names), '吃西瓜');
@@ -62,10 +78,10 @@ test('语音字幕进真实say叶子，不重复合成，不盖动画；同轮�
   });
   try {
     assert.match(view.instructions(), /吃西瓜/u);
-    assert.equal(view.accept({ sequence: 1, type: 'user', turnId: 'u1', text: '你吃个西瓜给我看' }), true);
+    assert.equal(view.accept({ sequence: 1, type: 'user', turnId: 'u1', text: '你喜欢吃西瓜吗' }), true);
     const anim = state.read().pets.fish.anim;
     assert.equal((anim.data as { name: string }).name, '吃西瓜');
-    view.accept({ sequence: 2, type: 'user', turnId: 'u1', text: '你吃个西瓜给我看' });
+    view.accept({ sequence: 2, type: 'user', turnId: 'u1', text: '你喜欢吃西瓜吗' });
     assert.equal(state.read().pets.fish.anim.counter, anim.counter);
     view.accept({ sequence: 3, type: 'assistant', turnId: 'a1', text: '啊呜，我开动啦。', complete: true });
     assert.deepEqual(state.read().pets.fish.say.data, { text: '啊呜，我开动啦。', anim: false, duration: 10000 });

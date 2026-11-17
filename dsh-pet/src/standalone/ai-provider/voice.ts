@@ -3,6 +3,9 @@ import type { AiRuntime } from './types.ts';
 import type { AiRequest } from '../ai-transport.ts';
 import type { WorkBuddyEvent } from '../workbuddy/connection.ts';
 import { WorkBuddyFailure } from '../workbuddy/executable.ts';
+import { codexTextStream } from '../codex/transport.ts';
+import { selectChatModel } from '../codex/chat-policy.ts';
+import { CodexFailure } from '../codex/errors.ts';
 
 /** 不带任务包装或工具，较短的回复尽早交给所选音色。 */
 export async function* workBuddyVoiceStream(
@@ -12,27 +15,39 @@ export async function* workBuddyVoiceStream(
   signal: AbortSignal,
 ): AsyncIterable<WorkBuddyEvent> {
   const settings = runtime.store.current();
-  if (!runtime.ready() || settings.protocol !== 'workbuddy' || settings.model !== model)
+  if (!runtime.ready() || !['codex', 'workbuddy'].includes(settings.protocol) || settings.model !== model)
     throw new WorkBuddyFailure('语音模型设置已变化，请结束后重新开始。');
   if (runtime.active) throw new WorkBuddyFailure('模型正在回复，请稍后继续说话。');
   const abort = new AbortController();
   runtime.active = abort;
   const combined = AbortSignal.any([signal, abort.signal, AbortSignal.timeout(30000)]);
+  const label = settings.protocol === 'codex' ? 'Codex' : 'WorkBuddy';
   try {
     combined.throwIfAborted();
-    for await (const event of runtime.workbuddy!.stream(model, request, combined, 256)) {
+    let effective = model;
+    if (settings.protocol === 'codex' && runtime.codexConnection)
+      effective = selectChatModel(await runtime.codexConnection.models(), model).id;
+    const transport =
+      settings.protocol === 'codex'
+        ? codexTextStream({ ...settings, model: effective }, request, combined, runtime.codexConnection)
+        : runtime.workbuddy!.stream(model, request, combined, 256);
+    if (settings.protocol === 'codex') yield { modelUsed: effective };
+    for await (const event of transport) {
       combined.throwIfAborted();
       if (
         !runtime.ready() ||
         runtime.store.current().model !== model ||
-        runtime.store.current().protocol !== 'workbuddy'
+        runtime.store.current().protocol !== settings.protocol
       )
         throw new WorkBuddyFailure('语音模型设置已变化，请重新开始。');
+      if ('refusal' in event && event.refusal) throw new WorkBuddyFailure(label + ' 暂未能回答，请换个问题。');
       yield event;
     }
   } catch (error) {
-    if (combined.aborted) throw new WorkBuddyFailure('WorkBuddy 回复已停止或超时，请继续说话重试。');
-    throw error instanceof WorkBuddyFailure ? error : new WorkBuddyFailure('WorkBuddy 暂未能回复，请检查登录和网络。');
+    if (combined.aborted) throw new WorkBuddyFailure(label + ' 回复已停止或超时，请继续说话重试。');
+    throw error instanceof WorkBuddyFailure || error instanceof CodexFailure
+      ? error
+      : new WorkBuddyFailure(label + ' 暂未能回复，请检查登录和网络。');
   } finally {
     abort.abort();
     if (runtime.active === abort) runtime.active = undefined;

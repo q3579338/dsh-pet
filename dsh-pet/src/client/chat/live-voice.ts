@@ -405,9 +405,13 @@ export function createLiveVoiceControl(options: LiveControlOptions): {
           return;
         }
         if (value.workbuddy !== true && value.source !== 'codex') throw new Error('Voice source unavailable');
-        const create = value.workbuddy === true ? createWorkBuddyVoiceControl : createCodexLiveVoiceControl;
+        const create =
+          !natural && (value.conversation === true || value.workbuddy === true)
+            ? createWorkBuddyVoiceControl
+            : createCodexLiveVoiceControl;
         inner = create({
           ...options,
+          source: value.source,
           canStart: () => true,
           changed: (state) => {
             options.changed(state);

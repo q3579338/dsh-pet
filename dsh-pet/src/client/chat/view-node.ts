@@ -396,8 +396,8 @@ export function composerNode(
                     children: liveVoiceStyle(live.styleId)?.synthesisVoice
                       ? (live.source === 'workbuddy'
                           ? 'WorkBuddy 自己识别语音并回答；'
-                          : 'Codex/OpenAI 识别语音并回答；') +
-                        '回复同步到头顶气泡，所选音色朗读；可说“吃个西瓜给我看”。本通不写入普通聊天记忆。'
+                          : 'Codex 识别语音，当前对话模型回答；') +
+                        '按文字对话规则联动动作，所选音色朗读并同步头顶气泡；本通不写入普通聊天记忆。'
                       : '语音发送至 Codex/OpenAI，直接播放 Codex 原声；回复同步到头顶气泡，可说“吃个西瓜给我看”。字幕不写入普通聊天记忆。',
                   })
                 : null,
